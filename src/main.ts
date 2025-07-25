@@ -39,7 +39,7 @@ class SequentialVideoPlayer {
         
         <div class="video-container">
           <canvas id="canvas" width="640" height="360"></canvas>
-          <video id="video" style="display: none;" crossorigin="anonymous"></video>
+          <video id="video" style="display: none;" crossorigin="anonymous" playsinline></video>
         </div>
         
         <div class="controls">
