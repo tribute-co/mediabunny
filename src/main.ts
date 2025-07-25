@@ -218,8 +218,8 @@ class MediabunnyPlayer {
     const aspectRatio = videoWidth / videoHeight
     
     // Set maximum dimensions
-    const maxHeight = 700
-    const maxWidth = 1000
+    const maxHeight = 500
+    const maxWidth = 800
     
     let canvasWidth = videoWidth
     let canvasHeight = videoHeight
