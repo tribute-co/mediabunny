@@ -1,266 +1,346 @@
 import './style.css'
 
-// Video URLs - the 3 videos to play sequentially
-const videoUrls = [
+// Demo video URLs for sequential playback
+const demoVideoUrls = [
   'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Brian.mp4',
   'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Vaibhav.mp4',
   'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/abbey_bradley (720p).mp4'
 ]
 
-class SequentialVideoPlayer {
-  private currentVideoIndex = 0
-  private videoElement: HTMLVideoElement
-  private canvas: HTMLCanvasElement
-  private ctx: CanvasRenderingContext2D
+class MediabunnyPlayer {
+  private container!: HTMLElement
+  private canvas!: HTMLCanvasElement
+  private ctx!: CanvasRenderingContext2D
+  private playButton!: HTMLButtonElement
+  private progressBar!: HTMLInputElement
+  private timeDisplay!: HTMLDivElement
+  private statusDisplay!: HTMLDivElement
+  private playlistElement!: HTMLElement
+  
+  private currentIndex = 0
   private isPlaying = false
-  private playButton: HTMLButtonElement
-  private nextButton: HTMLButtonElement
-  private prevButton: HTMLButtonElement
-  private progressElement: HTMLDivElement
+  private currentTime = 0
+  private duration = 0
+  private currentVideo: HTMLVideoElement | null = null
 
-  constructor() {
+  constructor(container: HTMLElement) {
+    this.container = container
     this.setupUI()
-    this.videoElement = document.getElementById('video') as HTMLVideoElement
-    this.canvas = document.getElementById('canvas') as HTMLCanvasElement
-    this.ctx = this.canvas.getContext('2d')!
-    this.playButton = document.getElementById('playBtn') as HTMLButtonElement
-    this.nextButton = document.getElementById('nextBtn') as HTMLButtonElement
-    this.prevButton = document.getElementById('prevBtn') as HTMLButtonElement
-    this.progressElement = document.getElementById('progress') as HTMLDivElement
-    
     this.setupEventListeners()
-    this.updateUI()
+    this.loadCurrentVideo(false) // Don't auto-play initial video
   }
 
   private setupUI() {
-    document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-      <div class="player-container">
-        <h1>Mediabunny Sequential Video Player</h1>
-        
+    this.container.innerHTML = `
+      <div class="mediabunny-player">
+        <div class="player-header">
+          <h1>🎬 Mediabunny Player</h1>
+          <p>Sequential video playback demo</p>
+        </div>
+
         <div class="video-container">
-          <canvas id="canvas" width="640" height="360"></canvas>
-          <video id="video" style="display: none;" crossorigin="anonymous" playsinline></video>
+          <canvas id="canvas"></canvas>
+          <div class="video-overlay">
+            <div class="play-overlay">
+              <button class="play-overlay-btn">▶</button>
+            </div>
+          </div>
         </div>
-        
+
         <div class="controls">
-          <button id="playBtn" class="control-btn">▶️ Play</button>
-          <button id="prevBtn" class="control-btn">⏮️ Previous</button>
-          <button id="nextBtn" class="control-btn">⏭️ Next</button>
+          <button id="playBtn" class="control-btn">▶</button>
+          <input type="range" id="progress" class="progress-bar" min="0" max="100" value="0">
+          <div id="timeDisplay" class="time-display">0:00 / 0:00</div>
         </div>
-        
-        <div class="info">
-          <div id="progress">Video 1 of 3</div>
-          <div id="status">Ready to play</div>
+
+        <div class="playlist">
+          <h3>Playlist</h3>
+          <div id="playlistItems" class="playlist-items"></div>
         </div>
-        
-        <div class="video-list">
-          <h3>Playlist:</h3>
-          <ol>
-            <li class="active">Brian.mp4</li>
-            <li>Vaibhav.mp4</li>
-            <li>abbey_bradley (720p).mp4</li>
-          </ol>
-        </div>
+
+        <div id="status" class="status"></div>
       </div>
     `
+
+    // Get references to elements
+    this.canvas = this.container.querySelector('#canvas') as HTMLCanvasElement
+    this.ctx = this.canvas.getContext('2d')!
+    this.playButton = this.container.querySelector('#playBtn') as HTMLButtonElement
+    this.progressBar = this.container.querySelector('#progress') as HTMLInputElement
+    this.timeDisplay = this.container.querySelector('#timeDisplay') as HTMLDivElement
+    this.statusDisplay = this.container.querySelector('#status') as HTMLDivElement
+    this.playlistElement = this.container.querySelector('#playlistItems') as HTMLElement
+
+    this.setupPlaylist()
+  }
+
+  private setupPlaylist() {
+    this.playlistElement.innerHTML = demoVideoUrls.map((url, index) => {
+      const filename = url.split('/').pop() || `Video ${index + 1}`
+      return `
+        <div class="playlist-item ${index === this.currentIndex ? 'active' : ''}" data-index="${index}">
+          <span class="playlist-number">${index + 1}</span>
+          <span class="playlist-title">${filename.replace('.mp4', '')}</span>
+        </div>
+      `
+    }).join('')
   }
 
   private setupEventListeners() {
+    // Play button
     this.playButton.addEventListener('click', () => this.togglePlay())
-    this.nextButton.addEventListener('click', () => this.nextVideo())
-    this.prevButton.addEventListener('click', () => this.previousVideo())
+
+    // Play overlay
+    const playOverlay = this.container.querySelector('.play-overlay-btn') as HTMLButtonElement
+    playOverlay.addEventListener('click', () => this.togglePlay())
+
+    // Progress bar
+    this.progressBar.addEventListener('input', () => this.seek())
+
+    // Playlist items
+    this.playlistElement.addEventListener('click', (e) => {
+      const item = (e.target as HTMLElement).closest('.playlist-item') as HTMLElement
+      if (item) {
+        const index = parseInt(item.dataset.index!)
+        this.switchToVideo(index)
+      }
+    })
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault()
+          this.togglePlay()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          this.seek(Math.max(0, this.currentTime - 10))
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          this.seek(Math.min(this.duration, this.currentTime + 10))
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          this.previousVideo()
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          this.nextVideo()
+          break
+      }
+    })
+
+    // Window resize handler
+    window.addEventListener('resize', () => {
+      this.resizeCanvasToVideo()
+    })
   }
 
-  private async loadCurrentVideo() {
+  private async loadCurrentVideo(autoPlay: boolean = false) {
     try {
-      const currentUrl = videoUrls[this.currentVideoIndex]
-      this.updateStatus(`Loading ${this.getVideoName(currentUrl)}...`)
+      this.updateStatus('Loading video...')
       
-      // Set up video element with the URL directly
-      this.videoElement.src = currentUrl
-      
+      // Clean up previous video
+      if (this.currentVideo) {
+        this.currentVideo.remove()
+        this.currentVideo = null
+      }
+
+      // Create new video element
+      this.currentVideo = document.createElement('video')
+      this.currentVideo.style.display = 'none'
+      this.currentVideo.crossOrigin = 'anonymous'
+      this.currentVideo.playsInline = true
+      document.body.appendChild(this.currentVideo)
+
       // Set up video event listeners
-      this.videoElement.onloadedmetadata = () => {
-        // Calculate dimensions to maintain aspect ratio within our 640x360 canvas
-        const videoAspect = this.videoElement.videoWidth / this.videoElement.videoHeight
-        const canvasAspect = 640 / 360
-        
-        if (videoAspect > canvasAspect) {
-          // Video is wider - fit to width
-          this.canvas.width = 640
-          this.canvas.height = Math.round(640 / videoAspect)
-        } else {
-          // Video is taller - fit to height
-          this.canvas.height = 360
-          this.canvas.width = Math.round(360 * videoAspect)
-        }
-        
-        this.updateStatus(`Loaded ${this.getVideoName(currentUrl)}`)
-      }
+      this.currentVideo.addEventListener('loadedmetadata', () => {
+        this.duration = this.currentVideo!.duration
+        this.resizeCanvasToVideo()
+        this.updateTimeDisplay()
+        this.updateStatus('Video loaded. Ready to play.')
+      })
+
+      this.currentVideo.addEventListener('timeupdate', () => {
+        this.currentTime = this.currentVideo!.currentTime
+        this.updateProgress()
+        this.updateTimeDisplay()
+      })
+
+      this.currentVideo.addEventListener('ended', () => {
+        this.nextVideo(true) // Auto-play next video
+      })
+
+      this.currentVideo.addEventListener('play', () => {
+        this.isPlaying = true
+        this.updatePlayButton()
+        this.startVideoRender()
+      })
+
+      this.currentVideo.addEventListener('pause', () => {
+        this.isPlaying = false
+        this.updatePlayButton()
+      })
+
+      // Load the video
+      this.currentVideo.src = demoVideoUrls[this.currentIndex]
+      this.updatePlaylist()
       
-      this.videoElement.onended = () => {
-        this.onVideoEnded()
+      // Auto-play if requested
+      if (autoPlay) {
+        // Small delay to ensure video is ready
+        setTimeout(async () => {
+          try {
+            await this.currentVideo!.play()
+            this.updateStatus('Auto-playing next video...')
+          } catch (error) {
+            console.warn('Auto-play blocked by browser:', error)
+            this.updateStatus('Click play to continue - auto-play blocked by browser')
+          }
+        }, 100)
       }
-      
-      this.videoElement.ontimeupdate = () => {
-        this.drawVideoToCanvas()
-      }
-      
-      this.videoElement.onerror = (e) => {
-        console.error('Video error:', e)
-        this.updateStatus(`Error loading video: ${currentUrl}`)
-      }
-      
-      this.updateUI()
       
     } catch (error) {
       console.error('Error loading video:', error)
-      this.updateStatus(`Error loading video: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      this.updateStatus(`Error loading video: ${error}`)
     }
   }
 
-  private drawVideoToCanvas() {
-    if (this.videoElement.readyState >= 2) {
-      this.ctx.drawImage(this.videoElement, 0, 0, this.canvas.width, this.canvas.height)
+  private resizeCanvasToVideo() {
+    if (!this.currentVideo) return
+
+    const videoWidth = this.currentVideo.videoWidth
+    const videoHeight = this.currentVideo.videoHeight
+    
+    // Calculate the aspect ratio
+    const aspectRatio = videoWidth / videoHeight
+    
+    // Set maximum dimensions
+    const maxHeight = 700
+    const maxWidth = 1000
+    
+    let canvasWidth = videoWidth
+    let canvasHeight = videoHeight
+    
+    // Scale down if video is too tall
+    if (canvasHeight > maxHeight) {
+      canvasHeight = maxHeight
+      canvasWidth = canvasHeight * aspectRatio
     }
+    
+    // Scale down if video is too wide
+    if (canvasWidth > maxWidth) {
+      canvasWidth = maxWidth
+      canvasHeight = canvasWidth / aspectRatio
+    }
+    
+    // Update canvas dimensions
+    this.canvas.width = canvasWidth
+    this.canvas.height = canvasHeight
+    this.canvas.style.width = `${canvasWidth}px`
+    this.canvas.style.height = `${canvasHeight}px`
+    
+    console.log(`Video dimensions: ${videoWidth}x${videoHeight}, Canvas: ${canvasWidth}x${canvasHeight}`)
+  }
+
+  private startVideoRender() {
+    const renderFrame = () => {
+      if (this.currentVideo && this.isPlaying) {
+        // Draw video frame to canvas
+        this.ctx.drawImage(this.currentVideo, 0, 0, this.canvas.width, this.canvas.height)
+        requestAnimationFrame(renderFrame)
+      }
+    }
+    renderFrame()
   }
 
   private async togglePlay() {
-    if (this.isPlaying) {
-      this.pause()
-    } else {
-      await this.play()
-    }
-  }
+    if (!this.currentVideo) return
 
-  private async play() {
-    if (!this.videoElement.src) {
-      await this.loadCurrentVideo()
-    }
-    
     try {
-      await this.videoElement.play()
-      this.isPlaying = true
-      this.playButton.textContent = '⏸️ Pause'
-      this.updateStatus('Playing...')
-      
-      // Start drawing frames to canvas
-      this.drawLoop()
-    } catch (error) {
-      console.error('Error playing video:', error)
-      this.updateStatus(`Error playing video: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
-  }
-
-  private pause() {
-    this.videoElement.pause()
-    this.isPlaying = false
-    this.playButton.textContent = '▶️ Play'
-    this.updateStatus('Paused')
-  }
-
-  private drawLoop() {
-    if (this.isPlaying && !this.videoElement.paused && !this.videoElement.ended) {
-      this.drawVideoToCanvas()
-      requestAnimationFrame(() => this.drawLoop())
-    }
-  }
-
-  private async nextVideo() {
-    if (this.currentVideoIndex < videoUrls.length - 1) {
-      this.currentVideoIndex++
-      await this.switchVideo()
-    }
-  }
-
-  private async previousVideo() {
-    if (this.currentVideoIndex > 0) {
-      this.currentVideoIndex--
-      await this.switchVideo()
-    }
-  }
-
-  private async switchVideo() {
-    const wasPlaying = this.isPlaying
-    this.pause()
-    this.videoElement.src = ''
-    
-    await this.loadCurrentVideo()
-    this.updateUI()
-    
-    if (wasPlaying) {
-      await this.play()
-    }
-  }
-
-  private onVideoEnded() {
-    this.updateStatus('Video ended')
-    
-    // Auto-advance to next video
-    if (this.currentVideoIndex < videoUrls.length - 1) {
-      setTimeout(async () => {
-        await this.nextVideo()
-        if (this.isPlaying) {
-          await this.play()
-        }
-      }, 1000) // 1 second delay before next video
-    } else {
-      // All videos finished
-      this.isPlaying = false
-      this.playButton.textContent = '▶️ Play'
-      this.updateStatus('All videos completed!')
-    }
-  }
-
-  private updateUI() {
-    this.progressElement.textContent = `Video ${this.currentVideoIndex + 1} of ${videoUrls.length}`
-    
-    // Update playlist highlighting
-    const listItems = document.querySelectorAll('.video-list li')
-    listItems.forEach((item, index) => {
-      if (index === this.currentVideoIndex) {
-        item.classList.add('active')
+      if (this.isPlaying) {
+        this.currentVideo.pause()
       } else {
-        item.classList.remove('active')
+        await this.currentVideo.play()
       }
+    } catch (error) {
+      console.error('Error toggling playback:', error)
+      this.updateStatus(`Playback error: ${error}`)
+    }
+  }
+
+  private seek(time?: number) {
+    if (!this.currentVideo) return
+
+    if (time !== undefined) {
+      this.currentVideo.currentTime = time
+    } else {
+      const seekTime = (parseFloat(this.progressBar.value) / 100) * this.duration
+      this.currentVideo.currentTime = seekTime
+    }
+  }
+
+  private switchToVideo(index: number, autoPlay: boolean = false) {
+    if (index >= 0 && index < demoVideoUrls.length && index !== this.currentIndex) {
+      const wasPlaying = this.isPlaying
+      this.currentIndex = index
+      this.loadCurrentVideo(autoPlay || wasPlaying)
+    }
+  }
+
+  private nextVideo(autoPlay: boolean = false) {
+    const nextIndex = (this.currentIndex + 1) % demoVideoUrls.length
+    this.switchToVideo(nextIndex, autoPlay)
+  }
+
+  private previousVideo(autoPlay: boolean = false) {
+    const prevIndex = this.currentIndex === 0 ? demoVideoUrls.length - 1 : this.currentIndex - 1
+    this.switchToVideo(prevIndex, autoPlay)
+  }
+
+  private updatePlayButton() {
+    this.playButton.textContent = this.isPlaying ? '⏸' : '▶'
+    const overlay = this.container.querySelector('.play-overlay-btn') as HTMLButtonElement
+    overlay.textContent = this.isPlaying ? '⏸' : '▶'
+  }
+
+  private updateProgress() {
+    if (this.duration > 0) {
+      const progress = (this.currentTime / this.duration) * 100
+      this.progressBar.value = progress.toString()
+    }
+  }
+
+  private updateTimeDisplay() {
+    const formatTime = (seconds: number) => {
+      const mins = Math.floor(seconds / 60)
+      const secs = Math.floor(seconds % 60)
+      return `${mins}:${secs.toString().padStart(2, '0')}`
+    }
+
+    this.timeDisplay.textContent = `${formatTime(this.currentTime)} / ${formatTime(this.duration)}`
+  }
+
+  private updatePlaylist() {
+    const items = this.playlistElement.querySelectorAll('.playlist-item')
+    items.forEach((item, index) => {
+      item.classList.toggle('active', index === this.currentIndex)
     })
-    
-    // Update button states
-    this.prevButton.disabled = this.currentVideoIndex === 0
-    this.nextButton.disabled = this.currentVideoIndex === videoUrls.length - 1
   }
 
   private updateStatus(message: string) {
-    const statusElement = document.getElementById('status')
-    if (statusElement) {
-      statusElement.textContent = message
-    }
-  }
-
-  private getVideoName(url: string): string {
-    return url.split('/').pop() || 'Unknown'
-  }
-
-  // Public method to start the player
-  async initialize() {
-    await this.loadCurrentVideo()
-    this.updateStatus('Ready to play')
+    this.statusDisplay.textContent = message
+    console.log('Mediabunny Player:', message)
   }
 }
 
-// Initialize the player when the page loads
-document.addEventListener('DOMContentLoaded', async () => {
-  try {
-    const player = new SequentialVideoPlayer()
-    await player.initialize()
-  } catch (error) {
-    console.error('Failed to initialize player:', error)
-    document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-      <div class="error">
-        <h1>Error</h1>
-        <p>Failed to initialize the video player: ${error instanceof Error ? error.message : 'Unknown error'}</p>
-        <p>Please check the console for more details.</p>
-      </div>
-    `
-  }
-})
+// Initialize the app
+document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
+  <div id="player-container"></div>
+`
+
+// Create player instance
+const container = document.querySelector('#player-container') as HTMLElement
+new MediabunnyPlayer(container)
