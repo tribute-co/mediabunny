@@ -277,6 +277,10 @@ class MediabunnyPlayer {
   private currentVideoEventListeners: { [key: string]: EventListener } = {}
   private imageTimer: number | null = null
   private imageStartTime: number = 0
+  private transitionDuration = 250 // 250ms transition
+  private transitionLeadTime = 250 // Start transition 250ms before end
+  private hasTriggeredEarlyTransition = false // Flag to prevent multiple early transitions
+  private enableEarlyTransitions = false // Temporarily disable early transitions for debugging
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -290,7 +294,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential video playback with GL Transitions (SimpleZoom)</p>
+          <p>Sequential media playback with seamless GL Transitions (250ms early fade)</p>
         </div>
 
         <div class="video-container">
@@ -426,6 +430,12 @@ class MediabunnyPlayer {
         await this.loadImage(mediaItem, autoPlay)
       }
       
+      // Reset early transition flag for new media
+      this.hasTriggeredEarlyTransition = false
+      
+      // Set up event listeners for the loaded media
+      this.setupMediaEventListeners()
+      
       this.updatePlaylist()
       
     } catch (error) {
@@ -452,26 +462,7 @@ class MediabunnyPlayer {
         resolve()
       })
 
-      video.addEventListener('timeupdate', () => {
-        this.currentTime = video.currentTime
-        this.updateProgress()
-        this.updateTimeDisplay()
-      })
-
-      video.addEventListener('ended', () => {
-        this.goToNextMedia(true)
-      })
-
-      video.addEventListener('play', () => {
-        this.isPlaying = true
-        this.updatePlayButton()
-        this.startVideoRender()
-      })
-
-      video.addEventListener('pause', () => {
-        this.isPlaying = false
-        this.updatePlayButton()
-      })
+      // Note: timeupdate, ended, play, pause listeners are set up in setupMediaEventListeners()
 
       this.currentMedia = video
       video.src = mediaItem.url
@@ -542,9 +533,29 @@ class MediabunnyPlayer {
         this.updateProgress()
         this.updateTimeDisplay()
         
-        if (this.currentTime >= this.duration) {
-          // Image duration complete
-          this.goToNextMedia(true)
+        // Only check for early transitions if we're in normal playback mode and have enough duration
+        if (!this.isTransitioning && this.duration > 1 && this.enableEarlyTransitions) {
+          // Check if we're approaching the end and should start transition
+          const timeRemaining = this.duration - this.currentTime
+          const shouldStartTransition = timeRemaining <= (this.transitionLeadTime / 1000) && timeRemaining > 0
+          
+          if (shouldStartTransition && !this.hasTriggeredEarlyTransition) {
+            console.log(`Starting early image transition with ${timeRemaining.toFixed(2)}s remaining`)
+            this.hasTriggeredEarlyTransition = true
+            this.startEarlyTransition()
+          } else if (this.currentTime >= this.duration) {
+            // Fallback: if we somehow miss the early transition, go to next
+            if (!this.isTransitioning) {
+              this.goToNextMedia(true)
+            }
+          } else {
+            this.imageTimer = requestAnimationFrame(updateTimer)
+          }
+        } else if (this.currentTime >= this.duration) {
+          // Simple fallback for short images or when transitions are disabled
+          if (!this.isTransitioning) {
+            this.goToNextMedia(true)
+          }
         } else {
           this.imageTimer = requestAnimationFrame(updateTimer)
         }
@@ -669,7 +680,7 @@ class MediabunnyPlayer {
       cancelAnimationFrame(this.animationId)
     }
 
-          const renderFrame = () => {
+    const renderFrame = () => {
         if (this.isTransitioning && this.currentMedia && this.nextMedia && this.glRenderer) {
           // Update textures for transition
           this.glRenderer.updateFromTexture(this.currentMedia)
@@ -740,10 +751,10 @@ class MediabunnyPlayer {
     if (!this.currentMedia) return
 
     if (this.currentMedia instanceof HTMLVideoElement) {
-      if (time !== undefined) {
+    if (time !== undefined) {
         this.currentMedia.currentTime = time
-      } else {
-        const seekTime = (parseFloat(this.progressBar.value) / 100) * this.duration
+    } else {
+      const seekTime = (parseFloat(this.progressBar.value) / 100) * this.duration
         this.currentMedia.currentTime = seekTime
       }
     } else if (this.currentMedia instanceof HTMLImageElement) {
@@ -762,7 +773,7 @@ class MediabunnyPlayer {
     if (index >= 0 && index < demoMediaUrls.length && index !== this.currentIndex && !this.isTransitioning) {
       try {
         this.isTransitioning = true
-        const wasPlaying = this.isPlaying
+      const wasPlaying = this.isPlaying
 
         // First, stop current playback cleanly
         if (this.currentMedia && this.isPlaying) {
@@ -806,7 +817,7 @@ class MediabunnyPlayer {
 
         this.currentMedia = this.nextMedia
         this.nextMedia = null
-        this.currentIndex = index
+      this.currentIndex = index
 
         // Update states
         if (this.currentMedia instanceof HTMLVideoElement) {
@@ -818,6 +829,9 @@ class MediabunnyPlayer {
           this.currentTime = 0
         }
         this.isPlaying = shouldPlay
+        
+        // Reset early transition flag for new media
+        this.hasTriggeredEarlyTransition = false
 
         // Set up event listeners for the new current media
         this.setupMediaEventListeners()
@@ -863,25 +877,43 @@ class MediabunnyPlayer {
         this.currentTime = this.currentMedia.currentTime
         this.updateProgress()
         this.updateTimeDisplay()
+        
+        // Only check for early transitions if we're in normal playback mode (not already transitioning)
+        if (!this.isTransitioning && this.duration > 1 && this.enableEarlyTransitions) { // Only for videos longer than 1 second
+          // Check if we're approaching the end and should start transition
+          const timeRemaining = this.duration - this.currentTime
+          const shouldStartTransition = timeRemaining <= (this.transitionLeadTime / 1000) && timeRemaining > 0
+          
+          if (shouldStartTransition && !this.hasTriggeredEarlyTransition) {
+            console.log(`Starting early transition with ${timeRemaining.toFixed(2)}s remaining`)
+            this.hasTriggeredEarlyTransition = true
+            this.startEarlyTransition()
+          }
+        }
       }
     }
 
     const endedListener = () => {
-      if (this.currentMedia && !this.isTransitioning) { // Only trigger if this is still the current media
+      if (this.currentMedia && !this.isTransitioning) { // Only trigger if this is still the current media and no transition in progress
+        console.log('Video ended - fallback transition (early transition may have been missed)')
         this.goToNextMedia(true)
       }
     }
 
     const playListener = () => {
       if (this.currentMedia) { // Safety check
+        console.log('Media play event triggered')
         this.isPlaying = true
         this.updatePlayButton()
         this.startVideoRender()
+        // Force ensure rendering as backup
+        setTimeout(() => this.ensureRendering(), 100)
       }
     }
 
     const pauseListener = () => {
       if (this.currentMedia) { // Safety check
+        console.log('Media pause event triggered')
         this.isPlaying = false
         this.updatePlayButton()
       }
@@ -915,14 +947,13 @@ class MediabunnyPlayer {
   private async performGLTransition(): Promise<void> {
     return new Promise((resolve) => {
       this.transitionProgress = 0
-      const duration = 1500 // 1.5 seconds
       const startTime = Date.now()
 
       this.startVideoRender() // Start rendering during transition
 
       const animateTransition = () => {
         const elapsed = Date.now() - startTime
-        this.transitionProgress = Math.min(elapsed / duration, 1)
+        this.transitionProgress = Math.min(elapsed / this.transitionDuration, 1)
 
         if (this.transitionProgress < 1) {
           requestAnimationFrame(animateTransition)
@@ -934,6 +965,16 @@ class MediabunnyPlayer {
 
       animateTransition()
     })
+  }
+
+  private async startEarlyTransition() {
+    if (this.isTransitioning) return
+    
+    const nextIndex = (this.currentIndex + 1) % demoMediaUrls.length
+    console.log(`Early transition: ${this.currentIndex} → ${nextIndex}`)
+    
+    // Start the transition with auto-play
+    this.switchToMedia(nextIndex, true)
   }
 
   private goToNextMedia(autoPlay: boolean = false) {
