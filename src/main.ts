@@ -25,12 +25,21 @@ vec4 transition (vec2 uv) {
 }
 `
 
-// Demo video URLs for sequential playback
-const demoVideoUrls = [
-  'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Brian.mp4',
-  'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Vaibhav.mp4',
-  'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/abbey_bradley (720p).mp4'
+// Demo media URLs for sequential playback (videos and images)
+const demoMediaUrls: MediaItem[] = [
+  { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Brian.mp4', type: 'video' },
+  { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/pexels-noelace-32608050.jpg', type: 'image', duration: 5 },
+  { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Vaibhav.mp4', type: 'video' },
+  { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/abbey_bradley (720p).mp4', type: 'video' }
 ]
+
+type MediaItem = {
+  url: string
+  type: 'video' | 'image'
+  duration?: number // For images, in seconds
+}
+
+type MediaElement = HTMLVideoElement | HTMLImageElement
 
 class GLTransitionRenderer {
   private gl: WebGLRenderingContext
@@ -171,25 +180,41 @@ class GLTransitionRenderer {
     })
   }
 
-  updateFromTexture(video: HTMLVideoElement) {
+  updateFromTexture(element: HTMLVideoElement | HTMLImageElement) {
     const gl = this.gl
-    // Check if video is ready to be used as texture (readyState >= 2 = HAVE_CURRENT_DATA)
-    if (video.readyState >= 2 && video.videoWidth > 0) {
+    
+    // Check if element is ready to be used as texture
+    let isReady = false
+    if (element instanceof HTMLVideoElement) {
+      isReady = element.readyState >= 2 && element.videoWidth > 0
+    } else if (element instanceof HTMLImageElement) {
+      isReady = element.complete && element.naturalWidth > 0
+    }
+    
+    if (isReady) {
       gl.bindTexture(gl.TEXTURE_2D, this.fromTexture)
       // Flip Y coordinate to fix upside-down video
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, element)
     }
   }
 
-  updateToTexture(video: HTMLVideoElement) {
+  updateToTexture(element: HTMLVideoElement | HTMLImageElement) {
     const gl = this.gl
-    // Check if video is ready to be used as texture (readyState >= 2 = HAVE_CURRENT_DATA)
-    if (video.readyState >= 2 && video.videoWidth > 0) {
+    
+    // Check if element is ready to be used as texture
+    let isReady = false
+    if (element instanceof HTMLVideoElement) {
+      isReady = element.readyState >= 2 && element.videoWidth > 0
+    } else if (element instanceof HTMLImageElement) {
+      isReady = element.complete && element.naturalWidth > 0
+    }
+    
+    if (isReady) {
       gl.bindTexture(gl.TEXTURE_2D, this.toTexture)
       // Flip Y coordinate to fix upside-down video
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, element)
     }
   }
 
@@ -244,18 +269,20 @@ class MediabunnyPlayer {
   private isPlaying = false
   private currentTime = 0
   private duration = 0
-  private currentVideo: HTMLVideoElement | null = null
-  private nextVideo: HTMLVideoElement | null = null
+  private currentMedia: MediaElement | null = null
+  private nextMedia: MediaElement | null = null
   private isTransitioning = false
   private transitionProgress = 0
   private animationId: number | null = null
   private currentVideoEventListeners: { [key: string]: EventListener } = {}
+  private imageTimer: number | null = null
+  private imageStartTime: number = 0
 
   constructor(container: HTMLElement) {
     this.container = container
     this.setupUI()
     this.setupEventListeners()
-    this.loadCurrentVideo(false) // Don't auto-play initial video
+    this.loadCurrentMedia(false) // Don't auto-play initial video
   }
 
   private setupUI() {
@@ -311,12 +338,12 @@ class MediabunnyPlayer {
   }
 
   private setupPlaylist() {
-    this.playlistElement.innerHTML = demoVideoUrls.map((url, index) => {
-      const filename = url.split('/').pop() || `Video ${index + 1}`
+    this.playlistElement.innerHTML = demoMediaUrls.map((item, index) => {
+      const filename = item.url.split('/').pop() || `Media ${index + 1}`
       return `
         <div class="playlist-item ${index === this.currentIndex ? 'active' : ''}" data-index="${index}">
           <span class="playlist-number">${index + 1}</span>
-          <span class="playlist-title">${filename.replace('.mp4', '')}</span>
+          <span class="playlist-title">${filename.replace('.mp4', '').replace('.jpg', '')}</span>
         </div>
       `
     }).join('')
@@ -339,9 +366,9 @@ class MediabunnyPlayer {
       if (item) {
         const index = parseInt(item.dataset.index!)
         if (index !== this.currentIndex) { // Only switch if different video
-          console.log(`Switching to video ${index + 1}`)
+          console.log(`Switching to media ${index + 1}`)
           // Always auto-play when clicking playlist items for better UX
-          this.switchToVideo(index, true)
+          this.switchToMedia(index, true)
         }
       }
     })
@@ -363,128 +390,248 @@ class MediabunnyPlayer {
           break
         case 'ArrowUp':
           e.preventDefault()
-          this.goToPreviousVideo()
+          this.goToPreviousMedia()
           break
         case 'ArrowDown':
           e.preventDefault()
-          this.goToNextVideo()
+          this.goToNextMedia()
           break
       }
     })
 
     // Window resize handler
     window.addEventListener('resize', () => {
-      this.resizeCanvasToVideo()
+      this.resizeCanvasToMedia()
     })
   }
 
-  private async loadCurrentVideo(autoPlay: boolean = false) {
+  private async loadCurrentMedia(autoPlay: boolean = false) {
     try {
-      this.updateStatus('Loading video...')
+      this.updateStatus('Loading media...')
       
-      // Clean up previous video
-      if (this.currentVideo) {
-        // Remove event listeners before removing the video
-        this.removeVideoEventListeners()
-        this.currentVideo.remove()
-        this.currentVideo = null
+      // Clean up previous media
+      if (this.currentMedia) {
+        // Remove event listeners before removing the media
+        this.removeMediaEventListeners()
+        this.clearImageTimer()
+        this.currentMedia.remove()
+        this.currentMedia = null
       }
 
+      const mediaItem = demoMediaUrls[this.currentIndex]
+      
+      if (mediaItem.type === 'video') {
+        await this.loadVideo(mediaItem, autoPlay)
+      } else if (mediaItem.type === 'image') {
+        await this.loadImage(mediaItem, autoPlay)
+      }
+      
+      this.updatePlaylist()
+      
+    } catch (error) {
+      console.error('Error loading media:', error)
+      this.updateStatus(`Error loading media: ${error}`)
+    }
+  }
+
+  private async loadVideo(mediaItem: MediaItem, autoPlay: boolean): Promise<void> {
+    return new Promise((resolve) => {
       // Create new video element
-      this.currentVideo = document.createElement('video')
-      this.currentVideo.style.display = 'none'
-      this.currentVideo.crossOrigin = 'anonymous'
-      this.currentVideo.playsInline = true
-      document.body.appendChild(this.currentVideo)
+      const video = document.createElement('video')
+      video.style.display = 'none'
+      video.crossOrigin = 'anonymous'
+      video.playsInline = true
+      document.body.appendChild(video)
 
       // Set up video event listeners
-      this.currentVideo.addEventListener('loadedmetadata', () => {
-        this.duration = this.currentVideo!.duration
-        this.resizeCanvasToVideo()
+      video.addEventListener('loadedmetadata', () => {
+        this.duration = video.duration
+        this.resizeCanvasToMedia()
         this.updateTimeDisplay()
         this.updateStatus('Video loaded. Ready to play.')
+        resolve()
       })
 
-      this.currentVideo.addEventListener('timeupdate', () => {
-        this.currentTime = this.currentVideo!.currentTime
+      video.addEventListener('timeupdate', () => {
+        this.currentTime = video.currentTime
         this.updateProgress()
         this.updateTimeDisplay()
       })
 
-      this.currentVideo.addEventListener('ended', () => {
-        this.goToNextVideo(true) // Auto-play next video
+      video.addEventListener('ended', () => {
+        this.goToNextMedia(true)
       })
 
-      this.currentVideo.addEventListener('play', () => {
+      video.addEventListener('play', () => {
         this.isPlaying = true
         this.updatePlayButton()
         this.startVideoRender()
       })
 
-      this.currentVideo.addEventListener('pause', () => {
+      video.addEventListener('pause', () => {
         this.isPlaying = false
         this.updatePlayButton()
       })
 
-      // Load the video
-      this.currentVideo.src = demoVideoUrls[this.currentIndex]
-      this.updatePlaylist()
+      this.currentMedia = video
+      video.src = mediaItem.url
       
       // Auto-play if requested
       if (autoPlay) {
-        // Small delay to ensure video is ready
         setTimeout(async () => {
           try {
-            await this.currentVideo!.play()
-            this.updateStatus('Auto-playing next video...')
+            await video.play()
+            this.updateStatus('Auto-playing video...')
           } catch (error) {
             console.warn('Auto-play blocked by browser:', error)
             this.updateStatus('Click play to continue - auto-play blocked by browser')
           }
         }, 100)
       }
-      
-    } catch (error) {
-      console.error('Error loading video:', error)
-      this.updateStatus(`Error loading video: ${error}`)
+    })
+  }
+
+  private async loadImage(mediaItem: MediaItem, autoPlay: boolean): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // Create new image element
+      const image = new Image()
+      image.crossOrigin = 'anonymous'
+      image.style.display = 'none'
+      document.body.appendChild(image)
+
+      image.addEventListener('load', () => {
+        this.duration = mediaItem.duration || 5 // Default 5 seconds
+        this.currentTime = 0
+        this.resizeCanvasToMedia()
+        this.updateTimeDisplay()
+        this.updateStatus('Image loaded. Ready to display.')
+        
+        this.currentMedia = image
+        
+        // Auto-start if requested
+        if (autoPlay) {
+          this.startImageDisplay()
+        }
+        
+        resolve()
+      })
+
+      image.addEventListener('error', (error) => {
+        reject(error)
+      })
+
+      image.src = mediaItem.url
+    })
+  }
+
+  private startImageDisplay() {
+    this.isPlaying = true
+    this.updatePlayButton()
+    this.imageStartTime = Date.now()
+    this.startVideoRender() // Start rendering the image
+    this.startImageTimer()
+  }
+
+  private startImageTimer() {
+    this.clearImageTimer()
+    
+    const updateTimer = () => {
+      if (this.isPlaying && this.currentMedia instanceof HTMLImageElement) {
+        const elapsed = (Date.now() - this.imageStartTime) / 1000
+        this.currentTime = Math.min(elapsed, this.duration)
+        this.updateProgress()
+        this.updateTimeDisplay()
+        
+        if (this.currentTime >= this.duration) {
+          // Image duration complete
+          this.goToNextMedia(true)
+        } else {
+          this.imageTimer = requestAnimationFrame(updateTimer)
+        }
+      }
+    }
+    
+    this.imageTimer = requestAnimationFrame(updateTimer)
+  }
+
+  private clearImageTimer() {
+    if (this.imageTimer) {
+      cancelAnimationFrame(this.imageTimer)
+      this.imageTimer = null
     }
   }
 
-  private async loadNextVideo(index: number): Promise<void> {
+  private async loadNextMedia(index: number): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        // Clean up previous next video
-        if (this.nextVideo) {
-          this.nextVideo.remove()
+        // Clean up previous next media
+        if (this.nextMedia) {
+          this.nextMedia.remove()
         }
 
-        // Create next video element
-        this.nextVideo = document.createElement('video')
-        this.nextVideo.style.display = 'none'
-        this.nextVideo.crossOrigin = 'anonymous'
-        this.nextVideo.playsInline = true
-        document.body.appendChild(this.nextVideo)
+        // Create next media element
+        const mediaItem = demoMediaUrls[index]
+        let nextMedia: MediaElement
+        
+        if (mediaItem.type === 'video') {
+          const video = document.createElement('video')
+          video.style.display = 'none'
+          video.crossOrigin = 'anonymous'
+          video.playsInline = true
+          document.body.appendChild(video)
+          
+          video.addEventListener('loadedmetadata', () => {
+            resolve()
+          })
+          
+          video.addEventListener('error', (error) => {
+            reject(error)
+          })
+          
+          video.src = mediaItem.url
+          nextMedia = video
+        } else if (mediaItem.type === 'image') {
+          const image = new Image()
+          image.style.display = 'none'
+          image.crossOrigin = 'anonymous'
+          document.body.appendChild(image)
+          
+          image.addEventListener('load', () => {
+            resolve()
+          })
+          
+          image.addEventListener('error', (error) => {
+            reject(error)
+          })
+          
+          image.src = mediaItem.url
+          nextMedia = image
+        } else {
+          reject(new Error('Unknown media type'))
+          return
+        }
 
-        this.nextVideo.addEventListener('loadedmetadata', () => {
-          resolve()
-        })
-
-        this.nextVideo.addEventListener('error', (error) => {
-          reject(error)
-        })
-
-        this.nextVideo.src = demoVideoUrls[index]
+        this.nextMedia = nextMedia
       } catch (error) {
         reject(error)
       }
     })
   }
 
-  private resizeCanvasToVideo() {
-    if (!this.currentVideo) return
+  private resizeCanvasToMedia() {
+    if (!this.currentMedia) return
 
-    const videoWidth = this.currentVideo.videoWidth
-    const videoHeight = this.currentVideo.videoHeight
+    let videoWidth: number, videoHeight: number
+    
+    if (this.currentMedia instanceof HTMLVideoElement) {
+      videoWidth = this.currentMedia.videoWidth
+      videoHeight = this.currentMedia.videoHeight
+    } else if (this.currentMedia instanceof HTMLImageElement) {
+      videoWidth = this.currentMedia.naturalWidth
+      videoHeight = this.currentMedia.naturalHeight
+    } else {
+      return
+    }
     
     // Calculate the aspect ratio
     const aspectRatio = videoWidth / videoHeight
@@ -522,37 +669,37 @@ class MediabunnyPlayer {
       cancelAnimationFrame(this.animationId)
     }
 
-    const renderFrame = () => {
-      if (this.isTransitioning && this.currentVideo && this.nextVideo && this.glRenderer) {
-        // Update textures for transition
-        this.glRenderer.updateFromTexture(this.currentVideo)
-        this.glRenderer.updateToTexture(this.nextVideo)
-        
-        // Render transition
-        this.glRenderer.render(
-          this.transitionProgress,
-          this.canvas.width,
-          this.canvas.height
-        )
-      } else if (this.currentVideo && this.glRenderer) {
-        // Regular playback - just show current video
-        // We need to render it as the "from" texture with progress = 0
-        try {
-          this.glRenderer.updateFromTexture(this.currentVideo)
-          // For non-transition rendering, we still need a "to" texture
-          // Use the same video for both textures with progress = 0
-          this.glRenderer.updateToTexture(this.currentVideo)
-          this.glRenderer.render(0, this.canvas.width, this.canvas.height)
-        } catch (error) {
-          console.warn('WebGL render error:', error)
+          const renderFrame = () => {
+        if (this.isTransitioning && this.currentMedia && this.nextMedia && this.glRenderer) {
+          // Update textures for transition
+          this.glRenderer.updateFromTexture(this.currentMedia)
+          this.glRenderer.updateToTexture(this.nextMedia)
+          
+          // Render transition
+          this.glRenderer.render(
+            this.transitionProgress,
+            this.canvas.width,
+            this.canvas.height
+          )
+        } else if (this.currentMedia && this.glRenderer) {
+          // Regular playback - just show current media
+          // We need to render it as the "from" texture with progress = 0
+          try {
+            this.glRenderer.updateFromTexture(this.currentMedia)
+            // For non-transition rendering, we still need a "to" texture
+            // Use the same media for both textures with progress = 0
+            this.glRenderer.updateToTexture(this.currentMedia)
+            this.glRenderer.render(0, this.canvas.width, this.canvas.height)
+          } catch (error) {
+            console.warn('WebGL render error:', error)
+          }
         }
-      }
 
       // Continue the render loop if playing or transitioning
       // Also continue for a few frames after to ensure proper rendering
       if (this.isPlaying || this.isTransitioning) {
         this.animationId = requestAnimationFrame(renderFrame)
-      } else if (this.currentVideo) {
+      } else if (this.currentMedia) {
         // Render one more frame when paused to ensure the video is visible
         this.animationId = requestAnimationFrame(() => {
           this.renderSingleFrame()
@@ -563,13 +710,23 @@ class MediabunnyPlayer {
   }
 
   private async togglePlay() {
-    if (!this.currentVideo) return
+    if (!this.currentMedia) return
 
     try {
       if (this.isPlaying) {
-        this.currentVideo.pause()
+        if (this.currentMedia instanceof HTMLVideoElement) {
+          this.currentMedia.pause()
+        } else if (this.currentMedia instanceof HTMLImageElement) {
+          this.isPlaying = false
+          this.updatePlayButton()
+          this.clearImageTimer()
+        }
       } else {
-        await this.currentVideo.play()
+        if (this.currentMedia instanceof HTMLVideoElement) {
+          await this.currentMedia.play()
+        } else if (this.currentMedia instanceof HTMLImageElement) {
+          this.startImageDisplay()
+        }
         // Ensure rendering starts when we play
         this.ensureRendering()
       }
@@ -580,62 +737,90 @@ class MediabunnyPlayer {
   }
 
   private seek(time?: number) {
-    if (!this.currentVideo) return
+    if (!this.currentMedia) return
 
-    if (time !== undefined) {
-      this.currentVideo.currentTime = time
-    } else {
-      const seekTime = (parseFloat(this.progressBar.value) / 100) * this.duration
-      this.currentVideo.currentTime = seekTime
+    if (this.currentMedia instanceof HTMLVideoElement) {
+      if (time !== undefined) {
+        this.currentMedia.currentTime = time
+      } else {
+        const seekTime = (parseFloat(this.progressBar.value) / 100) * this.duration
+        this.currentMedia.currentTime = seekTime
+      }
+    } else if (this.currentMedia instanceof HTMLImageElement) {
+      // For images, seeking changes the display time
+      if (time !== undefined) {
+        this.currentTime = Math.min(time, this.duration)
+      } else {
+        this.currentTime = (parseFloat(this.progressBar.value) / 100) * this.duration
+      }
+      this.imageStartTime = Date.now() - (this.currentTime * 1000)
+      this.updateTimeDisplay()
     }
   }
 
-  private async switchToVideo(index: number, autoPlay: boolean = false) {
-    if (index >= 0 && index < demoVideoUrls.length && index !== this.currentIndex && !this.isTransitioning) {
+  private async switchToMedia(index: number, autoPlay: boolean = false) {
+    if (index >= 0 && index < demoMediaUrls.length && index !== this.currentIndex && !this.isTransitioning) {
       try {
         this.isTransitioning = true
         const wasPlaying = this.isPlaying
 
         // First, stop current playback cleanly
-        if (this.currentVideo && this.isPlaying) {
-          this.currentVideo.pause()
+        if (this.currentMedia && this.isPlaying) {
+          if (this.currentMedia instanceof HTMLVideoElement) {
+            this.currentMedia.pause()
+          } else if (this.currentMedia instanceof HTMLImageElement) {
+            this.clearImageTimer()
+          }
           this.isPlaying = false
           this.updatePlayButton()
         }
 
-        this.updateStatus('Loading next video for transition...')
+        this.updateStatus('Loading next media for transition...')
 
-        // Load the next video
-        await this.loadNextVideo(index)
+        // Load the next media
+        await this.loadNextMedia(index)
 
-        // Start playing the next video if we should auto-play
+        // Start playing the next media if we should auto-play
         const shouldPlay = autoPlay || wasPlaying
-        if (shouldPlay && this.nextVideo) {
-          await this.nextVideo.play()
+        if (shouldPlay && this.nextMedia) {
+          if (this.nextMedia instanceof HTMLVideoElement) {
+            await this.nextMedia.play()
+          }
+          // Note: Image auto-play will be handled after media swap
         }
 
         // Perform GL transition
         await this.performGLTransition()
 
-        // Swap videos: next becomes current
-        if (this.currentVideo) {
-          this.currentVideo.pause()
-          // Clean up event listeners from the old video
-          this.removeVideoEventListeners()
-          this.currentVideo.remove()
+        // Swap media: next becomes current
+        if (this.currentMedia) {
+          if (this.currentMedia instanceof HTMLVideoElement) {
+            this.currentMedia.pause()
+          } else if (this.currentMedia instanceof HTMLImageElement) {
+            this.clearImageTimer()
+          }
+          // Clean up event listeners from the old media
+          this.removeMediaEventListeners()
+          this.currentMedia.remove()
         }
 
-        this.currentVideo = this.nextVideo
-        this.nextVideo = null
+        this.currentMedia = this.nextMedia
+        this.nextMedia = null
         this.currentIndex = index
 
         // Update states
-        this.duration = this.currentVideo!.duration
-        this.currentTime = this.currentVideo!.currentTime
+        if (this.currentMedia instanceof HTMLVideoElement) {
+          this.duration = this.currentMedia.duration
+          this.currentTime = this.currentMedia.currentTime
+        } else if (this.currentMedia instanceof HTMLImageElement) {
+          const mediaItem = demoMediaUrls[this.currentIndex]
+          this.duration = mediaItem.duration || 5
+          this.currentTime = 0
+        }
         this.isPlaying = shouldPlay
 
-        // Set up event listeners for the new current video
-        this.setupVideoEventListeners()
+        // Set up event listeners for the new current media
+        this.setupMediaEventListeners()
 
         this.updatePlaylist()
         this.updatePlayButton()
@@ -646,14 +831,18 @@ class MediabunnyPlayer {
 
         // Make sure rendering continues if we should be playing
         if (this.isPlaying) {
-          this.startVideoRender()
+          if (this.currentMedia instanceof HTMLImageElement) {
+            this.startImageDisplay()
+          } else {
+            this.startVideoRender()
+          }
         } else {
-          // Even if paused, we need to render one frame to show the video
+          // Even if paused, we need to render one frame to show the media
           this.renderSingleFrame()
         }
 
       } catch (error) {
-        console.error('Error during video transition:', error)
+        console.error('Error during media transition:', error)
         this.updateStatus(`Transition error: ${error}`)
         this.isTransitioning = false
         // Try to recover by ensuring we have a render frame
@@ -662,29 +851,29 @@ class MediabunnyPlayer {
     }
   }
 
-  private setupVideoEventListeners() {
-    if (!this.currentVideo) return
+  private setupMediaEventListeners() {
+    if (!this.currentMedia) return
 
     // Remove any existing event listeners first
-    this.removeVideoEventListeners()
+    this.removeMediaEventListeners()
 
     // Create new event listeners
     const timeUpdateListener = () => {
-      if (this.currentVideo) { // Safety check to ensure this is still the current video
-        this.currentTime = this.currentVideo.currentTime
+      if (this.currentMedia && this.currentMedia instanceof HTMLVideoElement) { // Only for videos
+        this.currentTime = this.currentMedia.currentTime
         this.updateProgress()
         this.updateTimeDisplay()
       }
     }
 
     const endedListener = () => {
-      if (this.currentVideo && !this.isTransitioning) { // Only trigger if this is still the current video
-        this.goToNextVideo(true)
+      if (this.currentMedia && !this.isTransitioning) { // Only trigger if this is still the current media
+        this.goToNextMedia(true)
       }
     }
 
     const playListener = () => {
-      if (this.currentVideo) { // Safety check
+      if (this.currentMedia) { // Safety check
         this.isPlaying = true
         this.updatePlayButton()
         this.startVideoRender()
@@ -692,7 +881,7 @@ class MediabunnyPlayer {
     }
 
     const pauseListener = () => {
-      if (this.currentVideo) { // Safety check
+      if (this.currentMedia) { // Safety check
         this.isPlaying = false
         this.updatePlayButton()
       }
@@ -707,17 +896,17 @@ class MediabunnyPlayer {
     }
 
     // Add event listeners
-    this.currentVideo.addEventListener('timeupdate', timeUpdateListener)
-    this.currentVideo.addEventListener('ended', endedListener)
-    this.currentVideo.addEventListener('play', playListener)
-    this.currentVideo.addEventListener('pause', pauseListener)
+    this.currentMedia.addEventListener('timeupdate', timeUpdateListener)
+    this.currentMedia.addEventListener('ended', endedListener)
+    this.currentMedia.addEventListener('play', playListener)
+    this.currentMedia.addEventListener('pause', pauseListener)
   }
 
-  private removeVideoEventListeners() {
-    if (this.currentVideo && Object.keys(this.currentVideoEventListeners).length > 0) {
+  private removeMediaEventListeners() {
+    if (this.currentMedia && Object.keys(this.currentVideoEventListeners).length > 0) {
       // Remove all stored event listeners
       Object.entries(this.currentVideoEventListeners).forEach(([event, listener]) => {
-        this.currentVideo!.removeEventListener(event, listener)
+        this.currentMedia!.removeEventListener(event, listener)
       })
       this.currentVideoEventListeners = {}
     }
@@ -747,14 +936,14 @@ class MediabunnyPlayer {
     })
   }
 
-  private goToNextVideo(autoPlay: boolean = false) {
-    const nextIndex = (this.currentIndex + 1) % demoVideoUrls.length
-    this.switchToVideo(nextIndex, autoPlay)
+  private goToNextMedia(autoPlay: boolean = false) {
+    const nextIndex = (this.currentIndex + 1) % demoMediaUrls.length
+    this.switchToMedia(nextIndex, autoPlay)
   }
 
-  private goToPreviousVideo(autoPlay: boolean = false) {
-    const prevIndex = this.currentIndex === 0 ? demoVideoUrls.length - 1 : this.currentIndex - 1
-    this.switchToVideo(prevIndex, autoPlay)
+  private goToPreviousMedia(autoPlay: boolean = false) {
+    const prevIndex = this.currentIndex === 0 ? demoMediaUrls.length - 1 : this.currentIndex - 1
+    this.switchToMedia(prevIndex, autoPlay)
   }
 
   private updatePlayButton() {
@@ -793,10 +982,10 @@ class MediabunnyPlayer {
   }
 
   private renderSingleFrame() {
-    if (this.currentVideo && this.glRenderer) {
+    if (this.currentMedia && this.glRenderer) {
       try {
-        this.glRenderer.updateFromTexture(this.currentVideo)
-        this.glRenderer.updateToTexture(this.currentVideo)
+        this.glRenderer.updateFromTexture(this.currentMedia)
+        this.glRenderer.updateToTexture(this.currentMedia)
         this.glRenderer.render(0, this.canvas.width, this.canvas.height)
       } catch (error) {
         console.warn('Single frame render error:', error)
@@ -806,7 +995,7 @@ class MediabunnyPlayer {
 
   private ensureRendering() {
     // Force restart rendering if it's not running
-    if (!this.animationId && this.currentVideo) {
+    if (!this.animationId && this.currentMedia) {
       console.log('Restarting video rendering...')
       if (this.isPlaying) {
         this.startVideoRender()
