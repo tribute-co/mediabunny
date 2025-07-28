@@ -281,12 +281,15 @@ class MediabunnyPlayer {
   private transitionLeadTime = 250 // Start transition 250ms before end
   private hasTriggeredEarlyTransition = false // Flag to prevent multiple early transitions
   private enableEarlyTransitions = false // Temporarily disable early transitions for debugging
+  private backgroundMusic: HTMLAudioElement | null = null
+  private musicVolumes = { video: 0.1, image: 0.9 } // 10% for videos, 90% for images
 
   constructor(container: HTMLElement) {
     this.container = container
     this.setupUI()
     this.setupEventListeners()
-    this.loadCurrentMedia(false) // Don't auto-play initial video
+    this.setupBackgroundMusic()
+    this.loadCurrentMedia(false) // Don't auto-play initial media
   }
 
   private setupUI() {
@@ -294,7 +297,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential media playback with seamless GL Transitions (250ms early fade)</p>
+          <p>Sequential media playback with GL Transitions + adaptive background music</p>
         </div>
 
         <div class="video-container">
@@ -436,6 +439,14 @@ class MediabunnyPlayer {
       // Set up event listeners for the loaded media
       this.setupMediaEventListeners()
       
+      // Adjust music volume based on media type
+      this.adjustMusicVolume(mediaItem.type)
+      
+      // Start background music if auto-playing
+      if (autoPlay) {
+        this.syncMusicPlayback()
+      }
+      
       this.updatePlaylist()
       
     } catch (error) {
@@ -521,6 +532,10 @@ class MediabunnyPlayer {
     this.imageStartTime = Date.now()
     this.startVideoRender() // Start rendering the image
     this.startImageTimer()
+    
+    // Ensure background music plays for images
+    console.log('Starting image display - syncing music playback')
+    this.syncMusicPlayback()
   }
 
   private startImageTimer() {
@@ -741,6 +756,10 @@ class MediabunnyPlayer {
         // Ensure rendering starts when we play
         this.ensureRendering()
       }
+      
+      // Sync background music with play/pause state
+      this.syncMusicPlayback()
+      
     } catch (error) {
       console.error('Error toggling playback:', error)
       this.updateStatus(`Playback error: ${error}`)
@@ -823,10 +842,14 @@ class MediabunnyPlayer {
         if (this.currentMedia instanceof HTMLVideoElement) {
           this.duration = this.currentMedia.duration
           this.currentTime = this.currentMedia.currentTime
+          // Adjust music volume for video
+          this.adjustMusicVolume('video')
         } else if (this.currentMedia instanceof HTMLImageElement) {
           const mediaItem = demoMediaUrls[this.currentIndex]
           this.duration = mediaItem.duration || 5
           this.currentTime = 0
+          // Adjust music volume for image
+          this.adjustMusicVolume('image')
         }
         this.isPlaying = shouldPlay
         
@@ -846,13 +869,22 @@ class MediabunnyPlayer {
         // Make sure rendering continues if we should be playing
         if (this.isPlaying) {
           if (this.currentMedia instanceof HTMLImageElement) {
-            this.startImageDisplay()
+            // For images, start display if not already started
+            if (!this.imageTimer) {
+              console.log('Starting image display after transition')
+              this.startImageDisplay()
+            } else {
+              console.log('Image display already running')
+              this.syncMusicPlayback()
+            }
           } else {
             this.startVideoRender()
+            this.syncMusicPlayback()
           }
         } else {
           // Even if paused, we need to render one frame to show the media
           this.renderSingleFrame()
+          this.syncMusicPlayback()
         }
 
       } catch (error) {
@@ -901,21 +933,29 @@ class MediabunnyPlayer {
     }
 
     const playListener = () => {
-      if (this.currentMedia) { // Safety check
+      if (this.currentMedia && !this.isTransitioning) { // Don't sync music during transitions
         console.log('Media play event triggered')
         this.isPlaying = true
         this.updatePlayButton()
         this.startVideoRender()
+        // Sync background music only if not transitioning
+        this.syncMusicPlayback()
         // Force ensure rendering as backup
         setTimeout(() => this.ensureRendering(), 100)
+      } else if (this.isTransitioning) {
+        console.log('Media play event during transition - ignoring for music sync')
       }
     }
 
     const pauseListener = () => {
-      if (this.currentMedia) { // Safety check
+      if (this.currentMedia && !this.isTransitioning) { // Don't sync music during transitions
         console.log('Media pause event triggered')
         this.isPlaying = false
         this.updatePlayButton()
+        // Sync background music only if not transitioning
+        this.syncMusicPlayback()
+      } else if (this.isTransitioning) {
+        console.log('Media pause event during transition - ignoring for music sync')
       }
     }
 
@@ -1043,6 +1083,78 @@ class MediabunnyPlayer {
       } else {
         this.renderSingleFrame()
       }
+    }
+  }
+
+  private setupBackgroundMusic() {
+    this.backgroundMusic = document.createElement('audio')
+    this.backgroundMusic.src = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/embrace-364091.mp3'
+    this.backgroundMusic.loop = true
+    this.backgroundMusic.volume = this.musicVolumes.video // Start with video volume
+    document.body.appendChild(this.backgroundMusic)
+    
+    this.backgroundMusic.addEventListener('loadeddata', () => {
+      this.updateStatus('Background music loaded')
+    })
+    
+    this.backgroundMusic.addEventListener('error', (e) => {
+      console.warn('Background music failed to load:', e)
+      this.updateStatus('Background music unavailable')
+    })
+  }
+
+  private adjustMusicVolume(mediaType: 'video' | 'image') {
+    if (!this.backgroundMusic) return
+    
+    const targetVolume = this.musicVolumes[mediaType]
+    console.log(`Adjusting music volume to ${targetVolume * 100}% for ${mediaType}`)
+    
+    // Smooth volume transition using native animation
+    const startVolume = this.backgroundMusic.volume
+    const duration = 500 // 500ms
+    const startTime = Date.now()
+    
+    const animateVolume = () => {
+      const elapsed = Date.now() - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      
+      // Ease in-out function
+      const easeProgress = progress < 0.5 
+        ? 2 * progress * progress 
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2
+      
+      this.backgroundMusic!.volume = startVolume + (targetVolume - startVolume) * easeProgress
+      
+      if (progress < 1) {
+        requestAnimationFrame(animateVolume)
+      }
+    }
+    
+    animateVolume()
+  }
+
+  private syncMusicPlayback() {
+    if (!this.backgroundMusic) {
+      console.log('No background music element found')
+      return
+    }
+    
+    console.log(`Syncing music: isPlaying=${this.isPlaying}, musicPaused=${this.backgroundMusic.paused}`)
+    
+    if (this.isPlaying) {
+      this.backgroundMusic.play().catch(e => 
+        console.warn('Background music play failed:', e)
+      )
+    } else {
+      this.backgroundMusic.pause()
+    }
+  }
+
+  private cleanupBackgroundMusic() {
+    if (this.backgroundMusic) {
+      this.backgroundMusic.pause()
+      this.backgroundMusic.remove()
+      this.backgroundMusic = null
     }
   }
 }

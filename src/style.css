@@ -105,6 +105,8 @@ body {
 }
 
 .play-overlay-btn {
+  width: 64px;
+  height: 64px;
   background: none;
   border: none;
   font-size: 2rem;
