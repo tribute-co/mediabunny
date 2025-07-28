@@ -1149,14 +1149,6 @@ class MediabunnyPlayer {
       this.backgroundMusic.pause()
     }
   }
-
-  private cleanupBackgroundMusic() {
-    if (this.backgroundMusic) {
-      this.backgroundMusic.pause()
-      this.backgroundMusic.remove()
-      this.backgroundMusic = null
-    }
-  }
 }
 
 // Initialize the app
