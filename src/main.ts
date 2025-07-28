@@ -28,10 +28,13 @@ vec4 transition (vec2 uv) {
 // Demo media URLs for sequential playback (videos and images)
 const demoMediaUrls: MediaItem[] = [
   { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Brian.mp4', type: 'video' },
-  // { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/pexels-noelace-32608050.jpg', type: 'image', duration: 5 },
+  { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/pexels-noelace-32608050.jpg', type: 'image', duration: 5 },
   { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Vaibhav.mp4', type: 'video' },
   { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/abbey_bradley (720p).mp4', type: 'video' }
 ]
+
+// Blank video to maintain Safari autoplay context during images
+const blankVideoUrl = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/blank.mp4'
 
 type MediaItem = {
   url: string
@@ -283,12 +286,14 @@ class MediabunnyPlayer {
   private enableEarlyTransitions = false // Temporarily disable early transitions for debugging
   private backgroundMusic: HTMLAudioElement | null = null
   private musicVolumes = { video: 0.1, image: 0.9 } // 10% for videos, 90% for images
+  private blankVideo: HTMLVideoElement | null = null // Blank video for Safari autoplay context
 
   constructor(container: HTMLElement) {
     this.container = container
     this.setupUI()
     this.setupEventListeners()
     this.setupBackgroundMusic()
+    this.setupBlankVideo()
     this.loadCurrentMedia(false) // Don't auto-play initial media
   }
 
@@ -297,7 +302,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential media playback with GL Transitions + adaptive background music</p>
+          <p>Sequential media playback with GL Transitions + adaptive music (Safari compatible)</p>
         </div>
 
         <div class="video-container">
@@ -442,6 +447,9 @@ class MediabunnyPlayer {
       // Adjust music volume based on media type
       this.adjustMusicVolume(mediaItem.type)
       
+      // Control blank video based on media type
+      this.controlBlankVideo(mediaItem.type)
+      
       // Start background music if auto-playing
       if (autoPlay) {
         this.syncMusicPlayback()
@@ -584,6 +592,26 @@ class MediabunnyPlayer {
     if (this.imageTimer) {
       cancelAnimationFrame(this.imageTimer)
       this.imageTimer = null
+    }
+    
+    // Stop blank video when not displaying images
+    if (this.blankVideo) {
+      console.log('Stopping blank video - no longer displaying image')
+      this.blankVideo.pause()
+    }
+  }
+
+  private controlBlankVideo(mediaType: 'video' | 'image') {
+    if (!this.blankVideo) return
+    
+    if (mediaType === 'image' && this.isPlaying) {
+      console.log('Starting blank video for image display')
+      this.blankVideo.play().catch(e => 
+        console.warn('Blank video play failed:', e)
+      )
+    } else {
+      console.log('Pausing blank video for video display')
+      this.blankVideo.pause()
     }
   }
 
@@ -757,6 +785,13 @@ class MediabunnyPlayer {
         this.ensureRendering()
       }
       
+      // Control blank video based on current media type and play state
+      if (this.currentMedia instanceof HTMLImageElement) {
+        this.controlBlankVideo('image')
+      } else {
+        this.controlBlankVideo('video')
+      }
+      
       // Sync background music with play/pause state
       this.syncMusicPlayback()
       
@@ -844,12 +879,16 @@ class MediabunnyPlayer {
           this.currentTime = this.currentMedia.currentTime
           // Adjust music volume for video
           this.adjustMusicVolume('video')
+          // Control blank video for Safari autoplay context
+          this.controlBlankVideo('video')
         } else if (this.currentMedia instanceof HTMLImageElement) {
           const mediaItem = demoMediaUrls[this.currentIndex]
           this.duration = mediaItem.duration || 5
           this.currentTime = 0
           // Adjust music volume for image
           this.adjustMusicVolume('image')
+          // Control blank video for Safari autoplay context
+          this.controlBlankVideo('image')
         }
         this.isPlaying = shouldPlay
         
@@ -1100,6 +1139,28 @@ class MediabunnyPlayer {
     this.backgroundMusic.addEventListener('error', (e) => {
       console.warn('Background music failed to load:', e)
       this.updateStatus('Background music unavailable')
+    })
+  }
+
+  private setupBlankVideo() {
+    this.blankVideo = document.createElement('video')
+    this.blankVideo.src = blankVideoUrl
+    this.blankVideo.loop = true
+    this.blankVideo.muted = true // Must be muted for autoplay
+    this.blankVideo.playsInline = true
+    this.blankVideo.style.display = 'none' // Hidden
+    this.blankVideo.style.position = 'absolute'
+    this.blankVideo.style.width = '1px'
+    this.blankVideo.style.height = '1px'
+    this.blankVideo.style.opacity = '0'
+    document.body.appendChild(this.blankVideo)
+    
+    this.blankVideo.addEventListener('loadeddata', () => {
+      console.log('Blank video loaded for Safari autoplay context')
+    })
+    
+    this.blankVideo.addEventListener('error', (e) => {
+      console.warn('Blank video failed to load:', e)
     })
   }
 
