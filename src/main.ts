@@ -263,7 +263,6 @@ class MediabunnyPlayer {
   private canvas!: HTMLCanvasElement
   private glRenderer!: GLTransitionRenderer
   private playButton!: HTMLButtonElement
-  private muteButton!: HTMLButtonElement
   private progressBar!: HTMLInputElement
   private timeDisplay!: HTMLDivElement
   private statusDisplay!: HTMLDivElement
@@ -271,7 +270,6 @@ class MediabunnyPlayer {
   
   private currentIndex = 0
   private isPlaying = false
-  private isMuted = true // Start muted for better Safari compatibility
   private currentTime = 0
   private duration = 0
   private currentMedia: MediaElement | null = null
@@ -295,18 +293,7 @@ class MediabunnyPlayer {
     this.setupUI()
     this.setupEventListeners()
     this.setupBackgroundMusic()
-    this.initializePlayer()
-  }
-  
-  private async initializePlayer() {
-    try {
-      // Setup blank video first and wait for it to be ready
-      await this.setupBlankVideo()
-      console.log('Safari autoplay context established - loading main media')
-    } catch (error) {
-      console.warn('Blank video setup failed, continuing without Safari autoplay fix:', error)
-    }
-    // Now load the first media
+    this.setupBlankVideo()
     this.loadCurrentMedia(false) // Don't auto-play initial media
   }
 
@@ -315,7 +302,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential media playback with GL Transitions + adaptive music (Starts muted for Safari compatibility)</p>
+          <p>Sequential media playback with GL Transitions + adaptive music (Safari compatible)</p>
         </div>
 
         <div class="video-container">
@@ -329,7 +316,6 @@ class MediabunnyPlayer {
 
         <div class="controls">
           <button id="playBtn" class="control-btn">▶</button>
-          <button id="muteBtn" class="control-btn">🔇</button>
           <input type="range" id="progress" class="progress-bar" min="0" max="100" value="0">
           <div id="timeDisplay" class="time-display">0:00 / 0:00</div>
         </div>
@@ -346,18 +332,10 @@ class MediabunnyPlayer {
     // Get references to elements
     this.canvas = this.container.querySelector('#canvas') as HTMLCanvasElement
     this.playButton = this.container.querySelector('#playBtn') as HTMLButtonElement
-    this.muteButton = this.container.querySelector('#muteBtn') as HTMLButtonElement
     this.progressBar = this.container.querySelector('#progress') as HTMLInputElement
     this.timeDisplay = this.container.querySelector('#timeDisplay') as HTMLDivElement
     this.statusDisplay = this.container.querySelector('#status') as HTMLDivElement
     this.playlistElement = this.container.querySelector('#playlistItems') as HTMLElement
-
-    // Debug: Check if buttons are found
-    console.log('Play button found:', !!this.playButton, this.playButton)
-    console.log('Mute button found:', !!this.muteButton, this.muteButton)
-
-    // Initialize mute button state
-    this.updateMuteButton()
 
     // Initialize WebGL renderer
     try {
@@ -385,25 +363,11 @@ class MediabunnyPlayer {
 
   private setupEventListeners() {
     // Play button
-    this.playButton.addEventListener('click', (e) => {
-      console.log('Play button clicked!', e)
-      // Visual feedback for debugging
-      this.playButton.style.backgroundColor = 'red'
-      setTimeout(() => {
-        this.playButton.style.backgroundColor = ''
-      }, 200)
-      this.togglePlay()
-    })
+    this.playButton.addEventListener('click', () => this.togglePlay())
 
     // Play overlay
     const playOverlay = this.container.querySelector('.play-overlay-btn') as HTMLButtonElement
-    playOverlay.addEventListener('click', (e) => {
-      console.log('Play overlay clicked!', e)
-      this.togglePlay()
-    })
-
-    // Mute button
-    this.muteButton.addEventListener('click', () => this.toggleMute())
+    playOverlay.addEventListener('click', () => this.togglePlay())
 
     // Progress bar
     this.progressBar.addEventListener('input', () => this.seek())
@@ -506,7 +470,6 @@ class MediabunnyPlayer {
       video.style.display = 'none'
       video.crossOrigin = 'anonymous'
       video.playsInline = true
-      video.muted = this.isMuted // Set mute state for Safari autoplay compatibility
       document.body.appendChild(video)
 
       // Set up video event listeners
@@ -518,8 +481,13 @@ class MediabunnyPlayer {
         resolve()
       })
       
-      // Note: We no longer stop blank video when real videos play
-      // The blank video should run continuously to maintain Safari autoplay context
+      // Stop blank video only AFTER real video starts playing successfully
+      video.addEventListener('play', () => {
+        console.log('Real video started playing - now safe to stop blank video')
+        if (this.blankVideo) {
+          this.blankVideo.pause()
+        }
+      }, { once: true }) // Only trigger once
 
       // Note: timeupdate, ended, play, pause listeners are set up in setupMediaEventListeners()
 
@@ -639,14 +607,16 @@ class MediabunnyPlayer {
   private controlBlankVideo(mediaType: 'video' | 'image') {
     if (!this.blankVideo) return
     
-    // Always ensure blank video is playing to maintain Safari autoplay context
-    // This is crucial for smooth video transitions on mobile Safari
-    if (this.blankVideo.paused) {
-      console.log(`Ensuring blank video continues for ${mediaType} (maintain Safari autoplay context)`)
-      this.blankVideo.play().catch(e => 
-        console.warn('Blank video play failed:', e)
-      )
+    if (mediaType === 'image') {
+      console.log('Ensuring blank video plays for image display (maintain Safari autoplay context)')
+      if (this.blankVideo.paused) {
+        this.blankVideo.play().catch(e => 
+          console.warn('Blank video play failed:', e)
+        )
+      }
     }
+    // For videos, we let the video's 'play' event handler stop the blank video
+    // This ensures we maintain autoplay context until the real video actually starts
   }
 
   private async loadNextMedia(index: number): Promise<void> {
@@ -666,7 +636,6 @@ class MediabunnyPlayer {
           video.style.display = 'none'
           video.crossOrigin = 'anonymous'
           video.playsInline = true
-          video.muted = this.isMuted // Set mute state for consistency
           document.body.appendChild(video)
           
           video.addEventListener('loadedmetadata', () => {
@@ -822,20 +791,21 @@ class MediabunnyPlayer {
       
       // Control blank video based on current media type and play state
       if (this.currentMedia instanceof HTMLImageElement) {
-        // For images, only pause blank video if user explicitly pauses
-        if (!this.isPlaying) {
-          console.log('User paused - pausing blank video')
+        if (this.isPlaying) {
+          console.log('Ensuring blank video plays for image (manual play)')
+          if (this.blankVideo && this.blankVideo.paused) {
+            this.blankVideo.play().catch(e => 
+              console.warn('Blank video play failed:', e)
+            )
+          }
+        } else {
+          console.log('Pausing blank video for paused image')
           if (this.blankVideo) {
             this.blankVideo.pause()
           }
-        } else {
-          // Ensure blank video is playing when image is playing
-          this.controlBlankVideo('image')
         }
-      } else {
-        // For videos, always ensure blank video keeps running for autoplay context
-        this.controlBlankVideo('video')
       }
+      // For videos, let the video's play event handle blank video stopping
       
       // Sync background music with play/pause state
       this.syncMusicPlayback()
@@ -1117,32 +1087,6 @@ class MediabunnyPlayer {
     overlay.textContent = this.isPlaying ? '⏸' : '▶'
   }
 
-  private updateMuteButton() {
-    this.muteButton.textContent = this.isMuted ? '🔊' : '🔇'
-  }
-
-  private toggleMute() {
-    this.isMuted = !this.isMuted
-    this.updateMuteButton()
-    
-    // Mute/unmute current video
-    if (this.currentMedia && this.currentMedia instanceof HTMLVideoElement) {
-      this.currentMedia.muted = this.isMuted
-    }
-    
-    // Mute/unmute next video if it exists
-    if (this.nextMedia && this.nextMedia instanceof HTMLVideoElement) {
-      this.nextMedia.muted = this.isMuted
-    }
-    
-    // Mute/unmute background music
-    if (this.backgroundMusic) {
-      this.backgroundMusic.muted = this.isMuted
-    }
-    
-    console.log(`Audio ${this.isMuted ? 'muted' : 'unmuted'}`)
-  }
-
   private updateProgress() {
     if (this.duration > 0) {
       const progress = (this.currentTime / this.duration) * 100
@@ -1201,7 +1145,6 @@ class MediabunnyPlayer {
     this.backgroundMusic.src = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/embrace-364091.mp3'
     this.backgroundMusic.loop = true
     this.backgroundMusic.volume = this.musicVolumes.video // Start with video volume
-    this.backgroundMusic.muted = this.isMuted // Start muted for better Safari compatibility
     document.body.appendChild(this.backgroundMusic)
     
     this.backgroundMusic.addEventListener('loadeddata', () => {
@@ -1214,37 +1157,29 @@ class MediabunnyPlayer {
     })
   }
 
-  private async setupBlankVideo(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.blankVideo = document.createElement('video')
-      this.blankVideo.src = blankVideoUrl
-      this.blankVideo.loop = true
-      this.blankVideo.muted = true // Must be muted for autoplay
-      this.blankVideo.playsInline = true
-      this.blankVideo.style.display = 'none' // Hidden
-      this.blankVideo.style.position = 'absolute'
-      this.blankVideo.style.width = '1px'
-      this.blankVideo.style.height = '1px'
-      this.blankVideo.style.opacity = '0'
-      document.body.appendChild(this.blankVideo)
-      
-      this.blankVideo.addEventListener('loadeddata', async () => {
-        console.log('Blank video loaded for Safari autoplay context')
-        try {
-          // Start blank video immediately to establish autoplay context
-          await this.blankVideo!.play()
-          console.log('Blank video playing - Safari autoplay context established')
-          resolve()
-        } catch (e) {
-          console.warn('Initial blank video play failed:', e)
-          reject(e)
-        }
-      })
-      
-      this.blankVideo.addEventListener('error', (e) => {
-        console.warn('Blank video failed to load:', e)
-        reject(e)
-      })
+  private setupBlankVideo() {
+    this.blankVideo = document.createElement('video')
+    this.blankVideo.src = blankVideoUrl
+    this.blankVideo.loop = true
+    this.blankVideo.muted = true // Must be muted for autoplay
+    this.blankVideo.playsInline = true
+    this.blankVideo.style.display = 'none' // Hidden
+    this.blankVideo.style.position = 'absolute'
+    this.blankVideo.style.width = '1px'
+    this.blankVideo.style.height = '1px'
+    this.blankVideo.style.opacity = '0'
+    document.body.appendChild(this.blankVideo)
+    
+    this.blankVideo.addEventListener('loadeddata', () => {
+      console.log('Blank video loaded for Safari autoplay context')
+      // Start blank video immediately to establish autoplay context
+      this.blankVideo!.play().catch(e => 
+        console.warn('Initial blank video play failed:', e)
+      )
+    })
+    
+    this.blankVideo.addEventListener('error', (e) => {
+      console.warn('Blank video failed to load:', e)
     })
   }
 
