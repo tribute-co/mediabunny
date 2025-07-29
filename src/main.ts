@@ -480,6 +480,14 @@ class MediabunnyPlayer {
         this.updateStatus('Video loaded. Ready to play.')
         resolve()
       })
+      
+      // Stop blank video only AFTER real video starts playing successfully
+      video.addEventListener('play', () => {
+        console.log('Real video started playing - now safe to stop blank video')
+        if (this.blankVideo) {
+          this.blankVideo.pause()
+        }
+      }, { once: true }) // Only trigger once
 
       // Note: timeupdate, ended, play, pause listeners are set up in setupMediaEventListeners()
 
@@ -593,26 +601,22 @@ class MediabunnyPlayer {
       cancelAnimationFrame(this.imageTimer)
       this.imageTimer = null
     }
-    
-    // Stop blank video when not displaying images
-    if (this.blankVideo) {
-      console.log('Stopping blank video - no longer displaying image')
-      this.blankVideo.pause()
-    }
+    // Note: Don't stop blank video here - let controlBlankVideo handle it based on next media type
   }
 
   private controlBlankVideo(mediaType: 'video' | 'image') {
     if (!this.blankVideo) return
     
-    if (mediaType === 'image' && this.isPlaying) {
-      console.log('Starting blank video for image display')
-      this.blankVideo.play().catch(e => 
-        console.warn('Blank video play failed:', e)
-      )
-    } else {
-      console.log('Pausing blank video for video display')
-      this.blankVideo.pause()
+    if (mediaType === 'image') {
+      console.log('Ensuring blank video plays for image display (maintain Safari autoplay context)')
+      if (this.blankVideo.paused) {
+        this.blankVideo.play().catch(e => 
+          console.warn('Blank video play failed:', e)
+        )
+      }
     }
+    // For videos, we let the video's 'play' event handler stop the blank video
+    // This ensures we maintain autoplay context until the real video actually starts
   }
 
   private async loadNextMedia(index: number): Promise<void> {
@@ -787,10 +791,21 @@ class MediabunnyPlayer {
       
       // Control blank video based on current media type and play state
       if (this.currentMedia instanceof HTMLImageElement) {
-        this.controlBlankVideo('image')
-      } else {
-        this.controlBlankVideo('video')
+        if (this.isPlaying) {
+          console.log('Ensuring blank video plays for image (manual play)')
+          if (this.blankVideo && this.blankVideo.paused) {
+            this.blankVideo.play().catch(e => 
+              console.warn('Blank video play failed:', e)
+            )
+          }
+        } else {
+          console.log('Pausing blank video for paused image')
+          if (this.blankVideo) {
+            this.blankVideo.pause()
+          }
+        }
       }
+      // For videos, let the video's play event handle blank video stopping
       
       // Sync background music with play/pause state
       this.syncMusicPlayback()
@@ -1157,6 +1172,10 @@ class MediabunnyPlayer {
     
     this.blankVideo.addEventListener('loadeddata', () => {
       console.log('Blank video loaded for Safari autoplay context')
+      // Start blank video immediately to establish autoplay context
+      this.blankVideo!.play().catch(e => 
+        console.warn('Initial blank video play failed:', e)
+      )
     })
     
     this.blankVideo.addEventListener('error', (e) => {
