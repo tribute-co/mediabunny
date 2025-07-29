@@ -380,12 +380,20 @@ class MediabunnyPlayer {
   }
 
   private setupEventListeners() {
-    // Play button
+    // Play button - add both click and touchstart for mobile compatibility
     this.playButton.addEventListener('click', () => this.togglePlay())
+    this.playButton.addEventListener('touchstart', (e) => {
+      e.preventDefault() // Prevent double-firing with click
+      this.togglePlay()
+    }, { passive: false })
 
-    // Play overlay
+    // Play overlay - add both click and touchstart for mobile compatibility  
     const playOverlay = this.container.querySelector('.play-overlay-btn') as HTMLButtonElement
     playOverlay.addEventListener('click', () => this.togglePlay())
+    playOverlay.addEventListener('touchstart', (e) => {
+      e.preventDefault() // Prevent double-firing with click
+      this.togglePlay()
+    }, { passive: false })
 
     // Mute button
     this.muteButton.addEventListener('click', () => this.toggleMute())
@@ -786,6 +794,8 @@ class MediabunnyPlayer {
   private async togglePlay() {
     if (!this.currentMedia) return
 
+    console.log(`Play button clicked - isPlaying: ${this.isPlaying}, mediaType: ${this.currentMedia instanceof HTMLVideoElement ? 'video' : 'image'}`)
+
     try {
       if (this.isPlaying) {
         if (this.currentMedia instanceof HTMLVideoElement) {
@@ -797,8 +807,19 @@ class MediabunnyPlayer {
         }
       } else {
         if (this.currentMedia instanceof HTMLVideoElement) {
-          await this.currentMedia.play()
+          try {
+            console.log('Attempting to play video...')
+            await this.currentMedia.play()
+            console.log('Video play successful')
+          } catch (playError) {
+            console.warn('Initial play failed, refreshing media with user gesture context:', playError)
+            // On mobile Safari, if initial play fails, reload the current media with autoplay
+            // This gives us fresh user gesture context
+            this.switchToMedia(this.currentIndex, true)
+            return
+          }
         } else if (this.currentMedia instanceof HTMLImageElement) {
+          console.log('Starting image display...')
           this.startImageDisplay()
         }
         // Ensure rendering starts when we play
