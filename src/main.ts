@@ -263,6 +263,7 @@ class MediabunnyPlayer {
   private canvas!: HTMLCanvasElement
   private glRenderer!: GLTransitionRenderer
   private playButton!: HTMLButtonElement
+  private muteButton!: HTMLButtonElement
   private progressBar!: HTMLInputElement
   private timeDisplay!: HTMLDivElement
   private statusDisplay!: HTMLDivElement
@@ -270,6 +271,7 @@ class MediabunnyPlayer {
   
   private currentIndex = 0
   private isPlaying = false
+  private isMuted = true // Start muted by default for better Safari compatibility
   private currentTime = 0
   private duration = 0
   private currentMedia: MediaElement | null = null
@@ -302,7 +304,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential media playback with GL Transitions + adaptive music (Safari compatible)</p>
+          <p>Sequential media playback with GL Transitions + adaptive music (Safari compatible, muted by default)</p>
         </div>
 
         <div class="video-container">
@@ -316,6 +318,7 @@ class MediabunnyPlayer {
 
         <div class="controls">
           <button id="playBtn" class="control-btn">▶</button>
+          <button id="muteBtn" class="control-btn">🔇</button>
           <input type="range" id="progress" class="progress-bar" min="0" max="100" value="0">
           <div id="timeDisplay" class="time-display">0:00 / 0:00</div>
         </div>
@@ -332,6 +335,7 @@ class MediabunnyPlayer {
     // Get references to elements
     this.canvas = this.container.querySelector('#canvas') as HTMLCanvasElement
     this.playButton = this.container.querySelector('#playBtn') as HTMLButtonElement
+    this.muteButton = this.container.querySelector('#muteBtn') as HTMLButtonElement
     this.progressBar = this.container.querySelector('#progress') as HTMLInputElement
     this.timeDisplay = this.container.querySelector('#timeDisplay') as HTMLDivElement
     this.statusDisplay = this.container.querySelector('#status') as HTMLDivElement
@@ -368,6 +372,9 @@ class MediabunnyPlayer {
     // Play overlay
     const playOverlay = this.container.querySelector('.play-overlay-btn') as HTMLButtonElement
     playOverlay.addEventListener('click', () => this.togglePlay())
+
+    // Mute button
+    this.muteButton.addEventListener('click', () => this.toggleMute())
 
     // Progress bar
     this.progressBar.addEventListener('input', () => this.seek())
@@ -470,6 +477,7 @@ class MediabunnyPlayer {
       video.style.display = 'none'
       video.crossOrigin = 'anonymous'
       video.playsInline = true
+      video.muted = this.isMuted // Respect current mute state
       document.body.appendChild(video)
 
       // Set up video event listeners
@@ -636,6 +644,7 @@ class MediabunnyPlayer {
           video.style.display = 'none'
           video.crossOrigin = 'anonymous'
           video.playsInline = true
+          video.muted = this.isMuted // Respect current mute state
           document.body.appendChild(video)
           
           video.addEventListener('loadedmetadata', () => {
@@ -816,6 +825,24 @@ class MediabunnyPlayer {
     }
   }
 
+  private async toggleMute() {
+    this.isMuted = !this.isMuted
+    this.muteButton.textContent = this.isMuted ? '🔇' : '🔊'
+    
+    // Mute/unmute background music
+    if (this.backgroundMusic) {
+      this.backgroundMusic.muted = this.isMuted
+    }
+    
+    // Mute/unmute current video if it's a video element
+    if (this.currentMedia instanceof HTMLVideoElement) {
+      this.currentMedia.muted = this.isMuted
+    }
+    
+    console.log(`Audio ${this.isMuted ? 'muted' : 'unmuted'}`)
+    this.updateStatus(`Audio ${this.isMuted ? 'muted' : 'unmuted'}`)
+  }
+
   private seek(time?: number) {
     if (!this.currentMedia) return
 
@@ -886,12 +913,14 @@ class MediabunnyPlayer {
 
         this.currentMedia = this.nextMedia
         this.nextMedia = null
-      this.currentIndex = index
+        this.currentIndex = index
 
         // Update states
         if (this.currentMedia instanceof HTMLVideoElement) {
           this.duration = this.currentMedia.duration
           this.currentTime = this.currentMedia.currentTime
+          // Ensure video respects current mute state
+          this.currentMedia.muted = this.isMuted
           // Adjust music volume for video
           this.adjustMusicVolume('video')
           // Control blank video for Safari autoplay context
@@ -1145,6 +1174,7 @@ class MediabunnyPlayer {
     this.backgroundMusic.src = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/embrace-364091.mp3'
     this.backgroundMusic.loop = true
     this.backgroundMusic.volume = this.musicVolumes.video // Start with video volume
+    this.backgroundMusic.muted = this.isMuted // Start muted by default
     document.body.appendChild(this.backgroundMusic)
     
     this.backgroundMusic.addEventListener('loadeddata', () => {
