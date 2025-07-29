@@ -63,20 +63,30 @@ body {
 /* Video Container */
 .video-container {
   position: relative;
+  margin-bottom: 2rem;
   display: flex;
   justify-content: center;
-  margin-bottom: 2rem;
+  align-items: center;
+  min-height: 400px;
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
-#canvas {
-  display: block;
-  background: #000;
-  border-radius: 12px;
+.media-display {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.media-display video,
+.media-display img {
   max-width: 100%;
-  height: auto;
+  max-height: 500px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 .video-overlay {
