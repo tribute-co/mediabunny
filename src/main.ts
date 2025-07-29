@@ -352,6 +352,10 @@ class MediabunnyPlayer {
     this.statusDisplay = this.container.querySelector('#status') as HTMLDivElement
     this.playlistElement = this.container.querySelector('#playlistItems') as HTMLElement
 
+    // Debug: Check if buttons are found
+    console.log('Play button found:', !!this.playButton, this.playButton)
+    console.log('Mute button found:', !!this.muteButton, this.muteButton)
+
     // Initialize mute button state
     this.updateMuteButton()
 
@@ -380,20 +384,23 @@ class MediabunnyPlayer {
   }
 
   private setupEventListeners() {
-    // Play button - add both click and touchstart for mobile compatibility
-    this.playButton.addEventListener('click', () => this.togglePlay())
-    this.playButton.addEventListener('touchstart', (e) => {
-      e.preventDefault() // Prevent double-firing with click
+    // Play button
+    this.playButton.addEventListener('click', (e) => {
+      console.log('Play button clicked!', e)
+      // Visual feedback for debugging
+      this.playButton.style.backgroundColor = 'red'
+      setTimeout(() => {
+        this.playButton.style.backgroundColor = ''
+      }, 200)
       this.togglePlay()
-    }, { passive: false })
+    })
 
-    // Play overlay - add both click and touchstart for mobile compatibility  
+    // Play overlay
     const playOverlay = this.container.querySelector('.play-overlay-btn') as HTMLButtonElement
-    playOverlay.addEventListener('click', () => this.togglePlay())
-    playOverlay.addEventListener('touchstart', (e) => {
-      e.preventDefault() // Prevent double-firing with click
+    playOverlay.addEventListener('click', (e) => {
+      console.log('Play overlay clicked!', e)
       this.togglePlay()
-    }, { passive: false })
+    })
 
     // Mute button
     this.muteButton.addEventListener('click', () => this.toggleMute())
@@ -794,8 +801,6 @@ class MediabunnyPlayer {
   private async togglePlay() {
     if (!this.currentMedia) return
 
-    console.log(`Play button clicked - isPlaying: ${this.isPlaying}, mediaType: ${this.currentMedia instanceof HTMLVideoElement ? 'video' : 'image'}`)
-
     try {
       if (this.isPlaying) {
         if (this.currentMedia instanceof HTMLVideoElement) {
@@ -807,19 +812,8 @@ class MediabunnyPlayer {
         }
       } else {
         if (this.currentMedia instanceof HTMLVideoElement) {
-          try {
-            console.log('Attempting to play video...')
-            await this.currentMedia.play()
-            console.log('Video play successful')
-          } catch (playError) {
-            console.warn('Initial play failed, refreshing media with user gesture context:', playError)
-            // On mobile Safari, if initial play fails, reload the current media with autoplay
-            // This gives us fresh user gesture context
-            this.switchToMedia(this.currentIndex, true)
-            return
-          }
+          await this.currentMedia.play()
         } else if (this.currentMedia instanceof HTMLImageElement) {
-          console.log('Starting image display...')
           this.startImageDisplay()
         }
         // Ensure rendering starts when we play

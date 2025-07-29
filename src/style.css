@@ -298,4 +298,24 @@ body {
     text-align: center;
     width: 100%;
   }
+  
+  /* Mobile-specific play button fixes */
+  .control-btn {
+    min-width: 44px; /* iOS recommended touch target size */
+    min-height: 44px;
+    padding: 0.8rem;
+    font-size: 1.4rem;
+  }
+  
+  /* Make video overlay always visible on mobile since there's no hover */
+  .video-overlay {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.1); /* Lighter so it doesn't obstruct video */
+  }
+  
+  .play-overlay-btn {
+    width: 80px; /* Larger touch target */
+    height: 80px;
+    font-size: 2.5rem;
+  }
 }
