@@ -32,6 +32,7 @@ class MediabunnyPlayer {
   private currentIndex = 0
   private isPlaying = false
   private isMuted = true // Start muted by default for better Safari compatibility
+  private isSwitchingMedia = false // Flag to prevent event interference during media switches
   private currentTime = 0
   private duration = 0
   private currentMedia: MediaElement | null = null
@@ -235,18 +236,31 @@ class MediabunnyPlayer {
       
       // Stop blank video only AFTER real video starts playing successfully
       video.addEventListener('play', () => {
-        console.log('Real video started playing - now safe to stop blank video')
+        console.log('Real video started playing - delaying blank video stop for Safari stability')
         if (this.blankVideo) {
-          this.blankVideo.pause()
+          // Wait a moment to ensure Safari autoplay context is fully established
+          setTimeout(() => {
+            console.log('Now stopping blank video - autoplay context should be stable')
+            this.blankVideo!.pause()
+          }, 1000) // Wait 1 second to ensure video is stable
         }
       }, { once: true }) // Only trigger once
 
       video.src = mediaItem.url
       
-      // Auto-play if requested
+      // Auto-play if requested - but be more careful about timing
       if (autoPlay) {
+        // Ensure blank video is playing first for Safari autoplay context
+        if (this.blankVideo && this.blankVideo.paused) {
+          console.log('Starting blank video before attempting video autoplay')
+          this.blankVideo.play().catch(e => 
+            console.warn('Blank video start failed:', e)
+          )
+        }
+        
         setTimeout(async () => {
           try {
+            console.log('Attempting video autoplay with blank video context')
             await video.play()
             this.isPlaying = true
             this.updatePlayButton()
@@ -254,8 +268,14 @@ class MediabunnyPlayer {
           } catch (error) {
             console.warn('Auto-play blocked by browser:', error)
             this.updateStatus('Click play to continue - auto-play blocked by browser')
+            // Keep blank video running even if main video fails
+            if (this.blankVideo && this.blankVideo.paused) {
+              this.blankVideo.play().catch(e => 
+                console.warn('Backup blank video play failed:', e)
+              )
+            }
           }
-        }, 100)
+        }, 200) // Slightly longer delay to ensure blank video is established
       }
     })
   }
@@ -342,9 +362,16 @@ class MediabunnyPlayer {
           console.warn('Blank video play failed:', e)
         )
       }
+    } else if (mediaType === 'video') {
+      // Keep blank video playing until the real video actually starts
+      console.log('Video loading - keeping blank video active until real video starts')
+      if (this.blankVideo.paused) {
+        this.blankVideo.play().catch(e => 
+          console.warn('Blank video play failed:', e)
+        )
+      }
     }
-    // For videos, we let the video's 'play' event handler stop the blank video
-    // This ensures we maintain autoplay context until the real video actually starts
+    // The blank video will be stopped by the video's 'play' event handler
   }
 
   private resizeCanvasToMedia() {
@@ -495,7 +522,17 @@ class MediabunnyPlayer {
   private async switchToMedia(index: number, autoPlay: boolean = false) {
     if (index >= 0 && index < demoMediaUrls.length && index !== this.currentIndex) {
       try {
+        this.isSwitchingMedia = true // Prevent event interference
         this.updateStatus('Loading media...')
+
+        // IMPORTANT: Keep blank video running during transition for Safari autoplay context
+        const nextMediaItem = demoMediaUrls[index]
+        if (nextMediaItem.type === 'video' && this.blankVideo && this.blankVideo.paused) {
+          console.log('Pre-starting blank video for upcoming video transition')
+          this.blankVideo.play().catch(e => 
+            console.warn('Pre-transition blank video failed:', e)
+          )
+        }
 
         // Stop current media cleanly
         if (this.currentMedia && this.isPlaying) {
@@ -516,9 +553,12 @@ class MediabunnyPlayer {
         this.updateTimeDisplay()
         this.updateStatus('Media switched successfully!')
 
+        this.isSwitchingMedia = false // Re-enable event handling
+
       } catch (error) {
         console.error('Error during media switch:', error)
         this.updateStatus(`Switch error: ${error}`)
+        this.isSwitchingMedia = false // Re-enable event handling on error
       }
     }
   }
@@ -546,20 +586,24 @@ class MediabunnyPlayer {
     }
 
     const playListener = () => {
-      if (this.currentMedia) {
+      if (this.currentMedia && !this.isSwitchingMedia) {
         console.log('Media play event triggered')
         this.isPlaying = true
         this.updatePlayButton()
         this.syncMusicPlayback()
+      } else if (this.isSwitchingMedia) {
+        console.log('Media play event during switch - ignoring to prevent interference')
       }
     }
 
     const pauseListener = () => {
-      if (this.currentMedia) {
+      if (this.currentMedia && !this.isSwitchingMedia) {
         console.log('Media pause event triggered')
         this.isPlaying = false
         this.updatePlayButton()
         this.syncMusicPlayback()
+      } else if (this.isSwitchingMedia) {
+        console.log('Media pause event during switch - ignoring to prevent interference')
       }
     }
 
@@ -674,6 +718,23 @@ class MediabunnyPlayer {
     
     this.blankVideo.addEventListener('error', (e) => {
       console.warn('Blank video failed to load:', e)
+    })
+    
+    // Keep blank video alive - restart if it stops unexpectedly
+    this.blankVideo.addEventListener('pause', () => {
+      console.log('Blank video paused - checking if we should restart it')
+      // Only restart if we're showing an image or transitioning to video
+      if (this.currentMedia instanceof HTMLImageElement || 
+          (this.currentIndex < demoMediaUrls.length && demoMediaUrls[this.currentIndex]?.type === 'image')) {
+        console.log('Restarting blank video to maintain autoplay context')
+        setTimeout(() => {
+          if (this.blankVideo && this.blankVideo.paused) {
+            this.blankVideo.play().catch(e => 
+              console.warn('Blank video restart failed:', e)
+            )
+          }
+        }, 100)
+      }
     })
   }
 
