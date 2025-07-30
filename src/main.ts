@@ -41,9 +41,6 @@ class MediabunnyPlayer {
   private backgroundMusic: HTMLAudioElement | null = null
   private musicVolumes = { video: 0.1, image: 0.9 } // 10% for videos, 90% for images
   private masterVideo: HTMLVideoElement | null = null // Single master video for Safari autoplay context
-  private audioContext: AudioContext | null = null // Web Audio API context for mobile volume control
-  private musicSource: MediaElementAudioSourceNode | null = null // Web Audio source
-  private musicGain: GainNode | null = null // Web Audio gain node for volume control
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -60,7 +57,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential media playback with mobile-optimized audio ducking</p>
+          <p>Sequential media playback with persistent video autoplay (Safari optimized)</p>
         </div>
 
         <div class="video-container">
@@ -476,16 +473,6 @@ class MediabunnyPlayer {
     this.isMuted = !this.isMuted
     this.muteButton.textContent = this.isMuted ? '🔇' : '🔊'
     
-    // Resume AudioContext if suspended and unmuting (mobile Safari requirement)
-    if (!this.isMuted && this.audioContext && this.audioContext.state === 'suspended') {
-      console.log('🎵 Resuming Web Audio API context on unmute')
-      try {
-        await this.audioContext.resume()
-      } catch (error) {
-        console.warn('Failed to resume audio context:', error)
-      }
-    }
-    
     // Mute/unmute background music
     if (this.backgroundMusic) {
       this.backgroundMusic.muted = this.isMuted
@@ -691,29 +678,9 @@ class MediabunnyPlayer {
     this.backgroundMusic = document.createElement('audio')
     this.backgroundMusic.src = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/embrace-364091.mp3'
     this.backgroundMusic.loop = true
-    this.backgroundMusic.volume = 1.0 // Keep at max, control via Web Audio API
+    this.backgroundMusic.volume = this.musicVolumes.video // Start with video volume
     this.backgroundMusic.muted = this.isMuted // Start muted by default
     document.body.appendChild(this.backgroundMusic)
-    
-    // Set up Web Audio API for mobile-compatible volume control
-    try {
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-      this.musicSource = this.audioContext.createMediaElementSource(this.backgroundMusic)
-      this.musicGain = this.audioContext.createGain()
-      
-      // Connect: source → gain → destination
-      this.musicSource.connect(this.musicGain)
-      this.musicGain.connect(this.audioContext.destination)
-      
-      // Set initial volume via gain node
-      this.musicGain.gain.value = this.musicVolumes.video
-      
-      console.log('🎵 Web Audio API setup complete for mobile volume control')
-      console.log(`🎵 Initial volume set to ${this.musicGain.gain.value * 100}%`)
-      console.log(`🎵 AudioContext state: ${this.audioContext.state}`)
-    } catch (error) {
-      console.warn('Web Audio API not available, falling back to element volume:', error)
-    }
     
     this.backgroundMusic.addEventListener('loadeddata', () => {
       this.updateStatus('Background music loaded')
@@ -762,13 +729,6 @@ class MediabunnyPlayer {
       console.log('🎬 Starting master video for Safari autoplay context')
       await this.masterVideo.play()
       this.hasUserInteracted = true
-      
-      // Resume AudioContext if suspended (required on mobile Safari)
-      if (this.audioContext && this.audioContext.state === 'suspended') {
-        console.log('🎵 Resuming Web Audio API context for mobile compatibility')
-        await this.audioContext.resume()
-      }
-      
       console.log('✅ Master video started successfully - autoplay context established')
     } catch (error) {
       console.warn('❌ Master video failed to start:', error)
@@ -799,49 +759,28 @@ class MediabunnyPlayer {
     const targetVolume = this.musicVolumes[mediaType]
     console.log(`Adjusting music volume to ${targetVolume * 100}% for ${mediaType}`)
     
-    // Use Web Audio API gain node if available (mobile-compatible)
-    if (this.musicGain && this.audioContext) {
-      console.log('🎵 Using Web Audio API gain node for volume control (mobile-compatible)')
-      console.log(`🎵 AudioContext state: ${this.audioContext.state}`)
-      console.log(`🎵 Current gain: ${this.musicGain.gain.value * 100}% → Target: ${targetVolume * 100}%`)
+    // Smooth volume transition using native animation
+    const startVolume = this.backgroundMusic.volume
+    const duration = 500 // 500ms
+    const startTime = Date.now()
+    
+    const animateVolume = () => {
+      const elapsed = Date.now() - startTime
+      const progress = Math.min(elapsed / duration, 1)
       
-      // Smooth volume transition using Web Audio API
-      const currentTime = this.audioContext.currentTime
-      const duration = 0.5 // 500ms
+      // Ease in-out function
+      const easeProgress = progress < 0.5 
+        ? 2 * progress * progress 
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2
       
-      // Cancel any existing volume changes
-      this.musicGain.gain.cancelScheduledValues(currentTime)
+      this.backgroundMusic!.volume = startVolume + (targetVolume - startVolume) * easeProgress
       
-      // Smooth transition to target volume
-      this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, currentTime)
-      this.musicGain.gain.linearRampToValueAtTime(targetVolume, currentTime + duration)
-      
-    } else {
-      // Fallback to HTMLAudioElement volume (desktop)
-      console.log('🎵 Using HTMLAudioElement volume (desktop fallback)')
-      
-      const startVolume = this.backgroundMusic.volume
-      const duration = 500 // 500ms
-      const startTime = Date.now()
-      
-      const animateVolume = () => {
-        const elapsed = Date.now() - startTime
-        const progress = Math.min(elapsed / duration, 1)
-        
-        // Ease in-out function
-        const easeProgress = progress < 0.5 
-          ? 2 * progress * progress 
-          : 1 - Math.pow(-2 * progress + 2, 2) / 2
-        
-        this.backgroundMusic!.volume = startVolume + (targetVolume - startVolume) * easeProgress
-        
-        if (progress < 1) {
-          requestAnimationFrame(animateVolume)
-        }
+      if (progress < 1) {
+        requestAnimationFrame(animateVolume)
       }
-      
-      animateVolume()
     }
+    
+    animateVolume()
   }
 
   private syncMusicPlayback() {
