@@ -40,7 +40,7 @@ class MediabunnyPlayer {
   private imageTimer: number | null = null
   private imageStartTime: number = 0
   private backgroundMusic: Howl | null = null
-  private musicVolumes = { video: 0.05, image: 0.25 } // Howler.js volume control: 5% for videos, 25% for images
+  private musicVolumes = { video: 0.025, image: 0.25 } // Howler.js volume control: 2.5% for videos, 25% for images
   private masterVideo: HTMLVideoElement | null = null // Single master video for Safari autoplay context
 
   constructor(container: HTMLElement) {
