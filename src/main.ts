@@ -234,17 +234,11 @@ class MediabunnyPlayer {
         resolve()
       })
       
-      // Stop blank video only AFTER real video starts playing successfully
+      // Keep blank video running - don't stop it when real video plays
+      // This maintains consistent Safari autoplay context
       video.addEventListener('play', () => {
-        console.log('Real video started playing - delaying blank video stop for Safari stability')
-        if (this.blankVideo) {
-          // Wait a moment to ensure Safari autoplay context is fully established
-          setTimeout(() => {
-            console.log('Now stopping blank video - autoplay context should be stable')
-            this.blankVideo!.pause()
-          }, 1000) // Wait 1 second to ensure video is stable
-        }
-      }, { once: true }) // Only trigger once
+        console.log('Real video started playing - keeping blank video active for consistent context')
+      }, { once: true })
 
       video.src = mediaItem.url
       
@@ -261,12 +255,14 @@ class MediabunnyPlayer {
         setTimeout(async () => {
           try {
             console.log('Attempting video autoplay with blank video context')
+            this.debugBlankVideoStatus('PRE-AUTOPLAY')
             await video.play()
             this.isPlaying = true
             this.updatePlayButton()
             this.updateStatus('Auto-playing video...')
           } catch (error) {
             console.warn('Auto-play blocked by browser:', error)
+            this.debugBlankVideoStatus('AUTOPLAY-FAILED')
             this.updateStatus('Click play to continue - auto-play blocked by browser')
             // Keep blank video running even if main video fails
             if (this.blankVideo && this.blankVideo.paused) {
@@ -355,23 +351,21 @@ class MediabunnyPlayer {
   private controlBlankVideo(mediaType: 'video' | 'image') {
     if (!this.blankVideo) return
     
-    if (mediaType === 'image') {
-      console.log('Ensuring blank video plays for image display (maintain Safari autoplay context)')
-      if (this.blankVideo.paused) {
-        this.blankVideo.play().catch(e => 
-          console.warn('Blank video play failed:', e)
-        )
-      }
-    } else if (mediaType === 'video') {
-      // Keep blank video playing until the real video actually starts
-      console.log('Video loading - keeping blank video active until real video starts')
-      if (this.blankVideo.paused) {
-        this.blankVideo.play().catch(e => 
-          console.warn('Blank video play failed:', e)
-        )
-      }
+    // Keep blank video playing at ALL times for maximum Safari autoplay context
+    console.log(`Ensuring blank video plays for ${mediaType} (maintain Safari autoplay context)`)
+    if (this.blankVideo.paused) {
+      this.blankVideo.play().catch(e => 
+        console.warn('Blank video play failed:', e)
+      )
     }
-    // The blank video will be stopped by the video's 'play' event handler
+  }
+
+  private debugBlankVideoStatus(context: string) {
+    if (this.blankVideo) {
+      console.log(`[${context}] Blank video status: paused=${this.blankVideo.paused}, currentTime=${this.blankVideo.currentTime.toFixed(2)}, readyState=${this.blankVideo.readyState}`)
+    } else {
+      console.log(`[${context}] No blank video element`)
+    }
   }
 
   private resizeCanvasToMedia() {
@@ -453,23 +447,6 @@ class MediabunnyPlayer {
         }
       }
       
-      // Control blank video based on current media type and play state
-      if (this.currentMedia instanceof HTMLImageElement) {
-        if (this.isPlaying) {
-          console.log('Ensuring blank video plays for image (manual play)')
-          if (this.blankVideo && this.blankVideo.paused) {
-            this.blankVideo.play().catch(e => 
-              console.warn('Blank video play failed:', e)
-            )
-          }
-        } else {
-          console.log('Pausing blank video for paused image')
-          if (this.blankVideo) {
-            this.blankVideo.pause()
-          }
-        }
-      }
-      
       // Sync background music with play/pause state
       this.syncMusicPlayback()
       
@@ -533,6 +510,7 @@ class MediabunnyPlayer {
             console.warn('Pre-transition blank video failed:', e)
           )
         }
+        this.debugBlankVideoStatus('TRANSITION-START')
 
         // Stop current media cleanly
         if (this.currentMedia && this.isPlaying) {
@@ -546,7 +524,9 @@ class MediabunnyPlayer {
 
         // Update index and load new media
         this.currentIndex = index
+        this.debugBlankVideoStatus('BEFORE-LOAD')
         await this.loadCurrentMedia(autoPlay)
+        this.debugBlankVideoStatus('AFTER-LOAD')
 
         this.updatePlaylist()
         this.updatePlayButton()
@@ -720,21 +700,17 @@ class MediabunnyPlayer {
       console.warn('Blank video failed to load:', e)
     })
     
-    // Keep blank video alive - restart if it stops unexpectedly
+    // Always keep blank video alive - restart immediately if it stops
     this.blankVideo.addEventListener('pause', () => {
-      console.log('Blank video paused - checking if we should restart it')
-      // Only restart if we're showing an image or transitioning to video
-      if (this.currentMedia instanceof HTMLImageElement || 
-          (this.currentIndex < demoMediaUrls.length && demoMediaUrls[this.currentIndex]?.type === 'image')) {
-        console.log('Restarting blank video to maintain autoplay context')
-        setTimeout(() => {
-          if (this.blankVideo && this.blankVideo.paused) {
-            this.blankVideo.play().catch(e => 
-              console.warn('Blank video restart failed:', e)
-            )
-          }
-        }, 100)
-      }
+      console.log('Blank video paused - restarting immediately to maintain autoplay context')
+      setTimeout(() => {
+        if (this.blankVideo && this.blankVideo.paused) {
+          console.log('Restarting blank video for continuous autoplay context')
+          this.blankVideo.play().catch(e => 
+            console.warn('Blank video restart failed:', e)
+          )
+        }
+      }, 50) // Very short delay
     })
   }
 
