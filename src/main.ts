@@ -1,5 +1,5 @@
 import './style.css'
-import { Howl, Howler } from 'howler'
+import { Howl } from 'howler'
 
 // Demo media URLs for sequential playbook (videos and images)
 const demoMediaUrls: MediaItem[] = [
@@ -686,7 +686,7 @@ class MediabunnyPlayer {
       onload: () => {
         this.updateStatus('Background music loaded')
       },
-      onloaderror: (id, error) => {
+      onloaderror: (_, error) => {
         console.warn('Background music failed to load:', error)
         this.updateStatus('Background music unavailable')
       }
