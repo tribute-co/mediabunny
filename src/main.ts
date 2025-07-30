@@ -34,6 +34,7 @@ class MediabunnyPlayer {
   private currentTime = 0
   private duration = 0
   private currentMedia: MediaElement | null = null
+  private persistentVideo: HTMLVideoElement | null = null // Single reusable video element
   private currentMediaEventListeners: { [key: string]: EventListener } = {}
   private imageTimer: number | null = null
   private imageStartTime: number = 0
@@ -47,6 +48,7 @@ class MediabunnyPlayer {
     this.setupEventListeners()
     this.setupBackgroundMusic()
     this.setupMasterVideo()
+    this.setupPersistentVideo()
     this.loadCurrentMedia(false) // Don't auto-play initial media
   }
 
@@ -55,7 +57,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential media playback with smart Safari autoplay (click play/unmute to start)</p>
+          <p>Sequential media playback with persistent video autoplay (Safari optimized)</p>
         </div>
 
         <div class="video-container">
@@ -175,10 +177,19 @@ class MediabunnyPlayer {
       
       // Clean up previous media
       if (this.currentMedia) {
-        // Remove event listeners before removing the media
+        // Remove event listeners before switching media
         this.removeMediaEventListeners()
         this.clearImageTimer()
-        this.currentMedia.remove()
+        
+        if (this.currentMedia instanceof HTMLVideoElement) {
+          // For videos, just pause - don't remove the persistent video
+          this.currentMedia.pause()
+          this.currentMedia.style.display = 'none'
+        } else if (this.currentMedia instanceof HTMLImageElement) {
+          // For images, remove from DOM as usual
+          this.currentMedia.remove()
+        }
+        
         this.currentMedia = null
       }
 
@@ -214,37 +225,40 @@ class MediabunnyPlayer {
 
   private async loadVideo(mediaItem: MediaItem, autoPlay: boolean): Promise<void> {
     return new Promise((resolve) => {
-      // Create new video element
-      const video = document.createElement('video')
-      video.style.display = 'none'
-      video.crossOrigin = 'anonymous'
-      video.playsInline = true
-      video.muted = this.isMuted // Respect current mute state
-      video.controls = false // Remove default controls
+      if (!this.persistentVideo) {
+        console.error('No persistent video element available')
+        return
+      }
 
-      // Set up video event listeners
-      video.addEventListener('loadedmetadata', () => {
+      // Clear any existing event listeners from persistent video
+      this.removeMediaEventListeners()
+
+      // Update the persistent video with new source
+      const video = this.persistentVideo
+      video.muted = this.isMuted // Respect current mute state
+      
+      // Set up video event listeners for the new source
+      const loadedHandler = () => {
         this.duration = video.duration
         this.currentMedia = video
         this.displayCurrentMedia()
         this.updateTimeDisplay()
         this.updateStatus('Video loaded. Ready to play.')
+        video.removeEventListener('loadedmetadata', loadedHandler) // Clean up this specific listener
         resolve()
-      })
+      }
       
-      // Keep blank video running - don't stop it when real video plays
-      // This maintains consistent Safari autoplay context
-      video.addEventListener('play', () => {
-        console.log('Real video started playing')
-      }, { once: true })
-
+      video.addEventListener('loadedmetadata', loadedHandler)
+      
+      // Set new source - this will trigger loading
+      console.log(`🎬 Switching persistent video to: ${mediaItem.url}`)
       video.src = mediaItem.url
       
       // Auto-play if requested and user has interacted
       if (autoPlay && this.hasUserInteracted) {
         setTimeout(async () => {
           try {
-            console.log('Attempting video autoplay with master video context')
+            console.log('Attempting video autoplay with persistent element + master video context')
             await video.play()
             this.isPlaying = true
             this.updatePlayButton()
@@ -382,9 +396,17 @@ class MediabunnyPlayer {
   private displayCurrentMedia() {
     if (!this.currentMedia || !this.videoContainer) return
 
-    // Clear container and add current media
+    // Clear container first
     this.videoContainer.innerHTML = ''
-    this.videoContainer.appendChild(this.currentMedia)
+    
+    if (this.currentMedia instanceof HTMLVideoElement) {
+      // For videos, move the persistent video into the container
+      this.videoContainer.appendChild(this.currentMedia)
+      this.currentMedia.style.display = 'block'
+    } else if (this.currentMedia instanceof HTMLImageElement) {
+      // For images, add them normally
+      this.videoContainer.appendChild(this.currentMedia)
+    }
     
     // Resize and position media
     this.resizeCanvasToMedia()
@@ -517,6 +539,14 @@ class MediabunnyPlayer {
 
     // Remove any existing event listeners first
     this.removeMediaEventListeners()
+
+    // For persistent video, add a play event listener to sync with master video
+    if (this.currentMedia instanceof HTMLVideoElement) {
+      const playHandler = () => {
+        console.log('Persistent video started playing')
+      }
+      this.currentMedia.addEventListener('play', playHandler, { once: true })
+    }
 
     // Create new event listeners
     const timeUpdateListener = () => {
@@ -659,6 +689,19 @@ class MediabunnyPlayer {
     document.body.appendChild(this.masterVideo)
     
     console.log('🎬 Master video created - will start on first user interaction')
+  }
+
+  private setupPersistentVideo() {
+    // Create a single video element that we'll reuse for all video content
+    this.persistentVideo = document.createElement('video')
+    this.persistentVideo.crossOrigin = 'anonymous'
+    this.persistentVideo.playsInline = true
+    this.persistentVideo.controls = false
+    this.persistentVideo.muted = this.isMuted
+    this.persistentVideo.style.display = 'none' // Hidden initially
+    document.body.appendChild(this.persistentVideo)
+    
+    console.log('🎬 Persistent video element created for reuse')
   }
 
   private async startMasterVideo() {
