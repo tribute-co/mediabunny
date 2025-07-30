@@ -32,6 +32,7 @@ class MediabunnyPlayer {
   private isMuted = true // Start muted by default for better Safari compatibility
   private isSwitchingMedia = false // Flag to prevent event interference during media switches
   private hasUserInteracted = false // Track if user has interacted (for master video)
+  private isMobile = false // Track if device is mobile
   private currentTime = 0
   private duration = 0
   private currentMedia: MediaElement | null = null
@@ -45,12 +46,30 @@ class MediabunnyPlayer {
 
   constructor(container: HTMLElement) {
     this.container = container
+    this.detectMobile()
     this.setupUI()
     this.setupEventListeners()
     this.setupBackgroundMusic()
     this.setupMasterVideo()
     this.setupPersistentVideo()
     this.loadCurrentMedia(false) // Don't auto-play initial media
+  }
+
+  private detectMobile() {
+    // Detect mobile devices using user agent and touch capability
+    const userAgent = navigator.userAgent.toLowerCase()
+    const isMobileUA = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent)
+    const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    const isSmallScreen = window.innerWidth <= 768
+    
+    this.isMobile = isMobileUA || (hasTouchScreen && isSmallScreen)
+    
+    // Adjust initial mute state based on device type
+    // Mobile: start muted and require interaction to unmute
+    // Desktop: start unmuted, allow immediate audio
+    this.isMuted = this.isMobile ? true : false
+    
+    console.log(`Device detected: ${this.isMobile ? 'Mobile' : 'Desktop'}, Initial mute: ${this.isMuted}`)
   }
 
   private setupUI() {
@@ -95,8 +114,12 @@ class MediabunnyPlayer {
     this.statusDisplay = this.container.querySelector('#status') as HTMLDivElement
     this.playlistElement = this.container.querySelector('#playlistItems') as HTMLElement
 
+    // Initialize mute button state based on device type
+    this.muteButton.textContent = this.isMuted ? '🔇' : '🔊'
+
     // Initialize basic player
-    this.updateStatus('Basic media player initialized')
+    const deviceInfo = this.isMobile ? 'Mobile device detected - audio muted by default' : 'Desktop device detected - audio enabled'
+    this.updateStatus(`Basic media player initialized. ${deviceInfo}`)
 
     this.setupPlaylist()
   }
@@ -457,9 +480,20 @@ class MediabunnyPlayer {
   }
 
   private async toggleMute() {
-    // Start master video on first user interaction
-    if (!this.hasUserInteracted) {
+    // On mobile devices, require user interaction before allowing unmute
+    if (this.isMobile && !this.hasUserInteracted && this.isMuted) {
       await this.startMasterVideo()
+      // After user interaction on mobile, we can proceed with unmute
+    } else if (!this.isMobile && !this.hasUserInteracted) {
+      // On desktop, start master video but don't require interaction for unmute
+      await this.startMasterVideo()
+    }
+
+    // Check if we can unmute based on device type and interaction
+    if (this.isMobile && !this.hasUserInteracted && this.isMuted) {
+      // On mobile, don't allow unmute without user interaction
+      this.updateStatus('Tap play or interact with the player first to enable audio on mobile devices')
+      return
     }
 
     this.isMuted = !this.isMuted
@@ -475,7 +509,8 @@ class MediabunnyPlayer {
       this.currentMedia.muted = this.isMuted
     }
     
-    console.log(`Audio ${this.isMuted ? 'muted' : 'unmuted'}`)
+    const deviceType = this.isMobile ? 'mobile' : 'desktop'
+    console.log(`Audio ${this.isMuted ? 'muted' : 'unmuted'} on ${deviceType}`)
     this.updateStatus(`Audio ${this.isMuted ? 'muted' : 'unmuted'}`)
   }
 
@@ -664,10 +699,11 @@ class MediabunnyPlayer {
       src: ['https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/embrace-364091.mp3'],
       loop: true,
       volume: this.musicVolumes.video, // Start with video volume
-      mute: this.isMuted, // Start muted by default
+      mute: this.isMuted, // Use device-specific mute state
       preload: true,
       onload: () => {
-        this.updateStatus('Background music loaded')
+        const muteInfo = this.isMuted ? ' (muted)' : ' (unmuted)'
+        this.updateStatus(`Background music loaded${muteInfo}`)
       },
       onloaderror: (_, error) => {
         console.warn('Background music failed to load:', error)
@@ -703,7 +739,7 @@ class MediabunnyPlayer {
     this.persistentVideo.crossOrigin = 'anonymous'
     this.persistentVideo.playsInline = true
     this.persistentVideo.controls = false
-    this.persistentVideo.muted = this.isMuted
+    this.persistentVideo.muted = this.isMuted // Use device-specific mute state
     this.persistentVideo.style.display = 'none' // Hidden initially
     document.body.appendChild(this.persistentVideo)
     
