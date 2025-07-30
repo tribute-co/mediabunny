@@ -681,7 +681,6 @@ class MediabunnyPlayer {
       loop: true,
       volume: this.musicVolumes.video, // Start with video volume
       mute: this.isMuted, // Start muted by default
-      html5: true, // Force HTML5 Audio for better compatibility
       preload: true,
       onload: () => {
         this.updateStatus('Background music loaded')
@@ -803,10 +802,20 @@ class MediabunnyPlayer {
     
     if (this.isPlaying) {
       if (!isPlaying) {
+        console.log('🎵 Starting background music')
+        
+        // Check if Howler.js audio context is suspended (common on mobile)
+        const ctx = (this.backgroundMusic as any)._audioNode?.context
+        if (ctx && ctx.state === 'suspended') {
+          console.log('🎵 Resuming suspended audio context')
+          await ctx.resume()
+        }
+        
         this.backgroundMusic.play()
       }
     } else {
       if (isPlaying) {
+        console.log('🎵 Pausing background music')
         this.backgroundMusic.pause()
       }
     }
