@@ -33,6 +33,7 @@ class MediabunnyPlayer {
   private isPlaying = false
   private isMuted = true // Start muted by default for better Safari compatibility
   private isSwitchingMedia = false // Flag to prevent event interference during media switches
+  private shouldRetryAutoplay = false // Flag to retry autoplay on next user interaction
   private currentTime = 0
   private duration = 0
   private currentMedia: MediaElement | null = null
@@ -242,20 +243,31 @@ class MediabunnyPlayer {
 
       video.src = mediaItem.url
       
-      // Auto-play if requested - but be more careful about timing
+      // Auto-play if requested - be more careful about timing
       if (autoPlay) {
         // Ensure blank video is playing first for Safari autoplay context
         if (this.blankVideo && this.blankVideo.paused) {
           console.log('Starting blank video before attempting video autoplay')
-          this.blankVideo.play().catch(e => 
-            console.warn('Blank video start failed:', e)
-          )
+          this.startBlankVideoAggressively()
         }
+        
+        // For mobile Safari, try immediate autoplay to preserve user gesture context
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+        const delay = isMobile ? 0 : 200 // No delay on mobile to preserve gesture context
         
         setTimeout(async () => {
           try {
-            console.log('Attempting video autoplay with blank video context')
+            console.log(`Attempting video autoplay with blank video context (mobile: ${isMobile}, delay: ${delay}ms)`)
             this.debugBlankVideoStatus('PRE-AUTOPLAY')
+            
+            // Extra aggressive blank video check right before autoplay
+            if (this.blankVideo && this.blankVideo.paused) {
+              console.log('Emergency blank video restart before autoplay')
+              await this.blankVideo.play().catch(e => 
+                console.warn('Emergency blank video failed:', e)
+              )
+            }
+            
             await video.play()
             this.isPlaying = true
             this.updatePlayButton()
@@ -265,13 +277,11 @@ class MediabunnyPlayer {
             this.debugBlankVideoStatus('AUTOPLAY-FAILED')
             this.updateStatus('Click play to continue - auto-play blocked by browser')
             // Keep blank video running even if main video fails
-            if (this.blankVideo && this.blankVideo.paused) {
-              this.blankVideo.play().catch(e => 
-                console.warn('Backup blank video play failed:', e)
-              )
-            }
+            this.startBlankVideoAggressively()
+            // Set flag to retry autoplay on next user interaction
+            this.shouldRetryAutoplay = true
           }
-        }, 200) // Slightly longer delay to ensure blank video is established
+        }, delay)
       }
     })
   }
@@ -353,11 +363,7 @@ class MediabunnyPlayer {
     
     // Keep blank video playing at ALL times for maximum Safari autoplay context
     console.log(`Ensuring blank video plays for ${mediaType} (maintain Safari autoplay context)`)
-    if (this.blankVideo.paused) {
-      this.blankVideo.play().catch(e => 
-        console.warn('Blank video play failed:', e)
-      )
-    }
+    this.startBlankVideoAggressively() // Use aggressive restart method
   }
 
   private debugBlankVideoStatus(context: string) {
@@ -427,6 +433,27 @@ class MediabunnyPlayer {
 
   private async togglePlay() {
     if (!this.currentMedia) return
+
+    // Check if we need to retry autoplay after previous failure
+    if (this.shouldRetryAutoplay && !this.isPlaying && this.currentMedia instanceof HTMLVideoElement) {
+      console.log('Retrying autoplay after user interaction to recover Safari context')
+      this.shouldRetryAutoplay = false
+      this.startBlankVideoAggressively() // Ensure blank video is active
+      this.debugBlankVideoStatus('AUTOPLAY-RETRY')
+      try {
+        await this.currentMedia.play()
+        this.isPlaying = true
+        this.updatePlayButton()
+        this.syncMusicPlayback()
+        this.updateStatus('Autoplay recovered after user interaction!')
+        console.log('Autoplay retry SUCCESS!')
+        return
+      } catch (error) {
+        console.warn('Autoplay retry failed:', error)
+        this.debugBlankVideoStatus('AUTOPLAY-RETRY-FAILED')
+        // Continue with normal toggle logic
+      }
+    }
 
     try {
       if (this.isPlaying) {
@@ -686,32 +713,59 @@ class MediabunnyPlayer {
     this.blankVideo.style.width = '1px'
     this.blankVideo.style.height = '1px'
     this.blankVideo.style.opacity = '0'
+    this.blankVideo.style.pointerEvents = 'none' // Prevent any interaction
     document.body.appendChild(this.blankVideo)
     
     this.blankVideo.addEventListener('loadeddata', () => {
       console.log('Blank video loaded for Safari autoplay context')
       // Start blank video immediately to establish autoplay context
-      this.blankVideo!.play().catch(e => 
-        console.warn('Initial blank video play failed:', e)
-      )
+      this.startBlankVideoAggressively()
     })
     
     this.blankVideo.addEventListener('error', (e) => {
       console.warn('Blank video failed to load:', e)
     })
     
-    // Always keep blank video alive - restart immediately if it stops
+    // Multiple strategies to keep blank video alive
     this.blankVideo.addEventListener('pause', () => {
       console.log('Blank video paused - restarting immediately to maintain autoplay context')
+      this.startBlankVideoAggressively()
+    })
+    
+    this.blankVideo.addEventListener('ended', () => {
+      console.log('Blank video ended - restarting immediately')
+      this.startBlankVideoAggressively()
+    })
+    
+    // Periodic check to ensure blank video stays alive
+    setInterval(() => {
+      if (this.blankVideo && this.blankVideo.paused) {
+        console.log('Periodic check: restarting paused blank video')
+        this.startBlankVideoAggressively()
+      }
+    }, 1000) // Check every second
+  }
+
+  private startBlankVideoAggressively() {
+    if (!this.blankVideo) return
+    
+    // Multiple restart attempts with different delays
+    const attemptPlay = (delay: number = 0) => {
       setTimeout(() => {
         if (this.blankVideo && this.blankVideo.paused) {
-          console.log('Restarting blank video for continuous autoplay context')
+          console.log(`Attempting blank video restart (delay: ${delay}ms)`)
           this.blankVideo.play().catch(e => 
-            console.warn('Blank video restart failed:', e)
+            console.warn(`Blank video restart failed (delay: ${delay}ms):`, e)
           )
         }
-      }, 50) // Very short delay
-    })
+      }, delay)
+    }
+    
+    // Try immediately and with various delays
+    attemptPlay(0)
+    attemptPlay(10)
+    attemptPlay(50)
+    attemptPlay(100)
   }
 
   private adjustMusicVolume(mediaType: 'video' | 'image') {
