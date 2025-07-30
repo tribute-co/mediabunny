@@ -210,9 +210,14 @@ class MediabunnyPlayer {
       // Sync master video with current state
       this.syncMasterVideo()
       
-      // Start background music if auto-playing
-      if (autoPlay) {
+      // Start background music sync - but only if not auto-playing videos
+      // (videos that autoplay will sync music after successful play)
+      const willAutoPlay = autoPlay && mediaItem.type === 'video' && this.hasUserInteracted
+      if (!willAutoPlay) {
+        console.log('Syncing music for non-autoplay scenario')
         this.syncMusicPlayback()
+      } else {
+        console.log('Skipping music sync - will sync after video autoplay succeeds')
       }
       
       this.updatePlaylist()
@@ -264,9 +269,19 @@ class MediabunnyPlayer {
             this.updatePlayButton()
             this.updateStatus('Auto-playing video...')
             this.syncMasterVideo() // Sync master video
+            // Sync music AFTER successful autoplay
+            console.log('Syncing music after successful autoplay')
+            this.syncMusicPlayback()
           } catch (error) {
             console.warn('Auto-play blocked by browser:', error)
             this.updateStatus('Click play to continue - auto-play blocked by browser')
+            // Sync music even when autoplay fails to keep state consistent
+            console.log('Syncing music after autoplay failed')
+            this.syncMusicPlayback()
+          } finally {
+            // Re-enable event handling after autoplay attempt completes
+            console.log('Re-enabling event handling after autoplay attempt')
+            this.isSwitchingMedia = false
           }
         }, 100) // Short delay to ensure video is ready
       }
@@ -524,7 +539,10 @@ class MediabunnyPlayer {
         this.updateTimeDisplay()
         this.updateStatus('Media switched successfully!')
 
-        this.isSwitchingMedia = false // Re-enable event handling
+        // Only clear switching flag if not auto-playing, otherwise let loadVideo clear it
+        if (!autoPlay || !this.hasUserInteracted || demoMediaUrls[index].type !== 'video') {
+          this.isSwitchingMedia = false // Re-enable event handling
+        }
 
       } catch (error) {
         console.error('Error during media switch:', error)
