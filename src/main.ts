@@ -1,4 +1,5 @@
 import './style.css'
+import { Howl, Howler } from 'howler'
 
 // Demo media URLs for sequential playbook (videos and images)
 const demoMediaUrls: MediaItem[] = [
@@ -38,8 +39,8 @@ class MediabunnyPlayer {
   private currentMediaEventListeners: { [key: string]: EventListener } = {}
   private imageTimer: number | null = null
   private imageStartTime: number = 0
-  private backgroundMusic: HTMLAudioElement | null = null
-  private musicVolumes = { video: 0.1, image: 0.9 } // 10% for videos, 90% for images
+  private backgroundMusic: Howl | null = null
+  private musicVolumes = { video: 0.05, image: 0.25 } // Howler.js volume control: 5% for videos, 25% for images
   private masterVideo: HTMLVideoElement | null = null // Single master video for Safari autoplay context
 
   constructor(container: HTMLElement) {
@@ -473,9 +474,9 @@ class MediabunnyPlayer {
     this.isMuted = !this.isMuted
     this.muteButton.textContent = this.isMuted ? '🔇' : '🔊'
     
-    // Mute/unmute background music
+    // Mute/unmute background music using Howler.js method
     if (this.backgroundMusic) {
-      this.backgroundMusic.muted = this.isMuted
+      this.backgroundMusic.mute(this.isMuted)
     }
     
     // Mute/unmute current video if it's a video element
@@ -675,22 +676,26 @@ class MediabunnyPlayer {
   }
 
   private setupBackgroundMusic() {
-    this.backgroundMusic = document.createElement('audio')
-    this.backgroundMusic.src = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/embrace-364091.mp3'
-    this.backgroundMusic.loop = true
-    this.backgroundMusic.volume = this.musicVolumes.video // Start with video volume
-    this.backgroundMusic.muted = this.isMuted // Start muted by default
-    document.body.appendChild(this.backgroundMusic)
-    
-    this.backgroundMusic.addEventListener('loadeddata', () => {
-      this.updateStatus('Background music loaded')
+    this.backgroundMusic = new Howl({
+      src: ['https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/embrace-364091.mp3'],
+      loop: true,
+      volume: this.musicVolumes.video, // Start with video volume
+      mute: this.isMuted, // Start muted by default
+      html5: true, // Force HTML5 Audio for better compatibility
+      preload: true,
+      onload: () => {
+        this.updateStatus('Background music loaded')
+      },
+      onloaderror: (id, error) => {
+        console.warn('Background music failed to load:', error)
+        this.updateStatus('Background music unavailable')
+      }
     })
     
-    this.backgroundMusic.addEventListener('error', (e) => {
-      console.warn('Background music failed to load:', e)
-      this.updateStatus('Background music unavailable')
-    })
+
   }
+
+  
 
   private setupMasterVideo() {
     this.masterVideo = document.createElement('video')
@@ -706,7 +711,7 @@ class MediabunnyPlayer {
     this.masterVideo.style.pointerEvents = 'none'
     document.body.appendChild(this.masterVideo)
     
-    console.log('🎬 Master video created - will start on first user interaction')
+
   }
 
   private setupPersistentVideo() {
@@ -719,7 +724,7 @@ class MediabunnyPlayer {
     this.persistentVideo.style.display = 'none' // Hidden initially
     document.body.appendChild(this.persistentVideo)
     
-    console.log('🎬 Persistent video element created for reuse')
+
   }
 
   private async startMasterVideo() {
@@ -729,7 +734,10 @@ class MediabunnyPlayer {
       console.log('🎬 Starting master video for Safari autoplay context')
       await this.masterVideo.play()
       this.hasUserInteracted = true
-      console.log('✅ Master video started successfully - autoplay context established')
+      
+      // Traditional volume control is ready
+      
+
     } catch (error) {
       console.warn('❌ Master video failed to start:', error)
     }
@@ -757,46 +765,50 @@ class MediabunnyPlayer {
     if (!this.backgroundMusic) return
     
     const targetVolume = this.musicVolumes[mediaType]
-    console.log(`Adjusting music volume to ${targetVolume * 100}% for ${mediaType}`)
+    this.adjustVolumeWithHowler(targetVolume)
+  }
+
+  private adjustVolumeWithHowler(targetVolume: number) {
+    if (!this.backgroundMusic) return
     
-    // Smooth volume transition using native animation
-    const startVolume = this.backgroundMusic.volume
-    const duration = 500 // 500ms
-    const startTime = Date.now()
-    
-    const animateVolume = () => {
-      const elapsed = Date.now() - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      
-      // Ease in-out function
-      const easeProgress = progress < 0.5 
-        ? 2 * progress * progress 
-        : 1 - Math.pow(-2 * progress + 2, 2) / 2
-      
-      this.backgroundMusic!.volume = startVolume + (targetVolume - startVolume) * easeProgress
-      
-      if (progress < 1) {
-        requestAnimationFrame(animateVolume)
+    // Force volume change when audio is ready
+    const setVolume = () => {
+      if (this.backgroundMusic && this.backgroundMusic.state() === 'loaded') {
+        this.backgroundMusic.volume(targetVolume)
+        
+        // Retry if the volume didn't set properly
+        const newVolume = this.backgroundMusic.volume()
+        if (Math.abs(newVolume - targetVolume) > 0.01) {
+          setTimeout(() => {
+            this.backgroundMusic!.volume(targetVolume)
+          }, 100)
+        }
       }
     }
     
-    animateVolume()
+    // Try volume change immediately and also after a delay if needed
+    setVolume()
+    
+    if (this.backgroundMusic.state() !== 'loaded') {
+      setTimeout(setVolume, 200)
+    }
   }
 
-  private syncMusicPlayback() {
-    if (!this.backgroundMusic) {
-      console.log('No background music element found')
-      return
-    }
+
+
+  private async syncMusicPlayback() {
+    if (!this.backgroundMusic) return
     
-    console.log(`Syncing music: isPlaying=${this.isPlaying}, musicPaused=${this.backgroundMusic.paused}`)
+    const isPlaying = this.backgroundMusic.playing()
     
     if (this.isPlaying) {
-      this.backgroundMusic.play().catch(e => 
-        console.warn('Background music play failed:', e)
-      )
+      if (!isPlaying) {
+        this.backgroundMusic.play()
+      }
     } else {
-      this.backgroundMusic.pause()
+      if (isPlaying) {
+        this.backgroundMusic.pause()
+      }
     }
 
     // Also sync master video
