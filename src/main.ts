@@ -341,7 +341,10 @@ class MediabunnyPlayer {
     this.imageStartTime = Date.now()
     this.startImageTimer()
     
-    // Ensure background music plays for images
+    // Clear switching flag since image transition is complete
+    this.isSwitchingMedia = false
+    
+    // Ensure background music continues for images
     this.syncMusicPlayback()
   }
 
@@ -566,7 +569,8 @@ class MediabunnyPlayer {
         this.updateTimeDisplay()
         this.updateStatus('Media switched successfully!')
 
-        // Only clear switching flag if not auto-playing, otherwise let loadVideo clear it
+        // Clear switching flag for images or non-auto-playing videos
+        // For auto-playing videos, loadVideo will clear the flag after successful play
         if (!autoPlay || !this.hasUserInteracted || demoMediaUrls[index].type !== 'video') {
           this.isSwitchingMedia = false // Re-enable event handling
         }
@@ -830,7 +834,9 @@ class MediabunnyPlayer {
         this.backgroundMusic.play()
       }
     } else {
-      if (isPlaying) {
+      // Only pause music if we're not in the middle of switching media
+      // This prevents music from restarting during transitions
+      if (isPlaying && !this.isSwitchingMedia) {
         this.backgroundMusic.pause()
       }
     }
