@@ -1,15 +1,12 @@
 import './style.css'
 
-// Demo media URLs for sequential playback (videos and images)
+// Demo media URLs for sequential playbook (videos and images)
 const demoMediaUrls: MediaItem[] = [
   { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Brian.mp4', type: 'video' },
   { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/pexels-noelace-32608050.jpg', type: 'image', duration: 5 },
   { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/Vaibhav.mp4', type: 'video' },
   { url: 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/abbey_bradley (720p).mp4', type: 'video' }
 ]
-
-// Blank video to maintain Safari autoplay context during images
-const blankVideoUrl = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/blank.mp4'
 
 type MediaItem = {
   url: string
@@ -33,7 +30,7 @@ class MediabunnyPlayer {
   private isPlaying = false
   private isMuted = true // Start muted by default for better Safari compatibility
   private isSwitchingMedia = false // Flag to prevent event interference during media switches
-  private shouldRetryAutoplay = false // Flag to retry autoplay on next user interaction
+  private hasUserInteracted = false // Track if user has interacted (for master video)
   private currentTime = 0
   private duration = 0
   private currentMedia: MediaElement | null = null
@@ -42,14 +39,14 @@ class MediabunnyPlayer {
   private imageStartTime: number = 0
   private backgroundMusic: HTMLAudioElement | null = null
   private musicVolumes = { video: 0.1, image: 0.9 } // 10% for videos, 90% for images
-  private blankVideo: HTMLVideoElement | null = null // Blank video for Safari autoplay context
+  private masterVideo: HTMLVideoElement | null = null // Single master video for Safari autoplay context
 
   constructor(container: HTMLElement) {
     this.container = container
     this.setupUI()
     this.setupEventListeners()
     this.setupBackgroundMusic()
-    this.setupBlankVideo()
+    this.setupMasterVideo()
     this.loadCurrentMedia(false) // Don't auto-play initial media
   }
 
@@ -58,7 +55,7 @@ class MediabunnyPlayer {
       <div class="mediabunny-player">
         <div class="player-header">
           <h1>🎬 Mediabunny Player</h1>
-          <p>Sequential media playback with adaptive music (Safari compatible, muted by default)</p>
+          <p>Sequential media playback with smart Safari autoplay (click play/unmute to start)</p>
         </div>
 
         <div class="video-container">
@@ -199,8 +196,8 @@ class MediabunnyPlayer {
       // Adjust music volume based on media type
       this.adjustMusicVolume(mediaItem.type)
       
-      // Control blank video based on media type
-      this.controlBlankVideo(mediaItem.type)
+      // Sync master video with current state
+      this.syncMasterVideo()
       
       // Start background music if auto-playing
       if (autoPlay) {
@@ -238,50 +235,26 @@ class MediabunnyPlayer {
       // Keep blank video running - don't stop it when real video plays
       // This maintains consistent Safari autoplay context
       video.addEventListener('play', () => {
-        console.log('Real video started playing - keeping blank video active for consistent context')
+        console.log('Real video started playing')
       }, { once: true })
 
       video.src = mediaItem.url
       
-      // Auto-play if requested - be more careful about timing
-      if (autoPlay) {
-        // Ensure blank video is playing first for Safari autoplay context
-        if (this.blankVideo && this.blankVideo.paused) {
-          console.log('Starting blank video before attempting video autoplay')
-          this.startBlankVideoAggressively()
-        }
-        
-        // For mobile Safari, try immediate autoplay to preserve user gesture context
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-        const delay = isMobile ? 0 : 200 // No delay on mobile to preserve gesture context
-        
+      // Auto-play if requested and user has interacted
+      if (autoPlay && this.hasUserInteracted) {
         setTimeout(async () => {
           try {
-            console.log(`Attempting video autoplay with blank video context (mobile: ${isMobile}, delay: ${delay}ms)`)
-            this.debugBlankVideoStatus('PRE-AUTOPLAY')
-            
-            // Extra aggressive blank video check right before autoplay
-            if (this.blankVideo && this.blankVideo.paused) {
-              console.log('Emergency blank video restart before autoplay')
-              await this.blankVideo.play().catch(e => 
-                console.warn('Emergency blank video failed:', e)
-              )
-            }
-            
+            console.log('Attempting video autoplay with master video context')
             await video.play()
             this.isPlaying = true
             this.updatePlayButton()
             this.updateStatus('Auto-playing video...')
+            this.syncMasterVideo() // Sync master video
           } catch (error) {
             console.warn('Auto-play blocked by browser:', error)
-            this.debugBlankVideoStatus('AUTOPLAY-FAILED')
             this.updateStatus('Click play to continue - auto-play blocked by browser')
-            // Keep blank video running even if main video fails
-            this.startBlankVideoAggressively()
-            // Set flag to retry autoplay on next user interaction
-            this.shouldRetryAutoplay = true
           }
-        }, delay)
+        }, 100) // Short delay to ensure video is ready
       }
     })
   }
@@ -358,21 +331,7 @@ class MediabunnyPlayer {
     // Note: Don't stop blank video here - let controlBlankVideo handle it based on next media type
   }
 
-  private controlBlankVideo(mediaType: 'video' | 'image') {
-    if (!this.blankVideo) return
-    
-    // Keep blank video playing at ALL times for maximum Safari autoplay context
-    console.log(`Ensuring blank video plays for ${mediaType} (maintain Safari autoplay context)`)
-    this.startBlankVideoAggressively() // Use aggressive restart method
-  }
 
-  private debugBlankVideoStatus(context: string) {
-    if (this.blankVideo) {
-      console.log(`[${context}] Blank video status: paused=${this.blankVideo.paused}, currentTime=${this.blankVideo.currentTime.toFixed(2)}, readyState=${this.blankVideo.readyState}`)
-    } else {
-      console.log(`[${context}] No blank video element`)
-    }
-  }
 
   private resizeCanvasToMedia() {
     if (!this.currentMedia) return
@@ -434,25 +393,9 @@ class MediabunnyPlayer {
   private async togglePlay() {
     if (!this.currentMedia) return
 
-    // Check if we need to retry autoplay after previous failure
-    if (this.shouldRetryAutoplay && !this.isPlaying && this.currentMedia instanceof HTMLVideoElement) {
-      console.log('Retrying autoplay after user interaction to recover Safari context')
-      this.shouldRetryAutoplay = false
-      this.startBlankVideoAggressively() // Ensure blank video is active
-      this.debugBlankVideoStatus('AUTOPLAY-RETRY')
-      try {
-        await this.currentMedia.play()
-        this.isPlaying = true
-        this.updatePlayButton()
-        this.syncMusicPlayback()
-        this.updateStatus('Autoplay recovered after user interaction!')
-        console.log('Autoplay retry SUCCESS!')
-        return
-      } catch (error) {
-        console.warn('Autoplay retry failed:', error)
-        this.debugBlankVideoStatus('AUTOPLAY-RETRY-FAILED')
-        // Continue with normal toggle logic
-      }
+    // Start master video on first user interaction
+    if (!this.hasUserInteracted) {
+      await this.startMasterVideo()
     }
 
     try {
@@ -474,7 +417,8 @@ class MediabunnyPlayer {
         }
       }
       
-      // Sync background music with play/pause state
+      // Sync master video and background music with play/pause state
+      this.syncMasterVideo()
       this.syncMusicPlayback()
       
     } catch (error) {
@@ -484,6 +428,11 @@ class MediabunnyPlayer {
   }
 
   private async toggleMute() {
+    // Start master video on first user interaction
+    if (!this.hasUserInteracted) {
+      await this.startMasterVideo()
+    }
+
     this.isMuted = !this.isMuted
     this.muteButton.textContent = this.isMuted ? '🔇' : '🔊'
     
@@ -529,15 +478,10 @@ class MediabunnyPlayer {
         this.isSwitchingMedia = true // Prevent event interference
         this.updateStatus('Loading media...')
 
-        // IMPORTANT: Keep blank video running during transition for Safari autoplay context
-        const nextMediaItem = demoMediaUrls[index]
-        if (nextMediaItem.type === 'video' && this.blankVideo && this.blankVideo.paused) {
-          console.log('Pre-starting blank video for upcoming video transition')
-          this.blankVideo.play().catch(e => 
-            console.warn('Pre-transition blank video failed:', e)
-          )
+        // Sync master video for upcoming transition
+        if (this.hasUserInteracted) {
+          this.syncMasterVideo()
         }
-        this.debugBlankVideoStatus('TRANSITION-START')
 
         // Stop current media cleanly
         if (this.currentMedia && this.isPlaying) {
@@ -551,9 +495,7 @@ class MediabunnyPlayer {
 
         // Update index and load new media
         this.currentIndex = index
-        this.debugBlankVideoStatus('BEFORE-LOAD')
         await this.loadCurrentMedia(autoPlay)
-        this.debugBlankVideoStatus('AFTER-LOAD')
 
         this.updatePlaylist()
         this.updatePlayButton()
@@ -702,71 +644,53 @@ class MediabunnyPlayer {
     })
   }
 
-  private setupBlankVideo() {
-    this.blankVideo = document.createElement('video')
-    this.blankVideo.src = blankVideoUrl
-    this.blankVideo.loop = true
-    this.blankVideo.muted = true // Must be muted for autoplay
-    this.blankVideo.playsInline = true
-    this.blankVideo.style.display = 'none' // Hidden
-    this.blankVideo.style.position = 'absolute'
-    this.blankVideo.style.width = '1px'
-    this.blankVideo.style.height = '1px'
-    this.blankVideo.style.opacity = '0'
-    this.blankVideo.style.pointerEvents = 'none' // Prevent any interaction
-    document.body.appendChild(this.blankVideo)
+  private setupMasterVideo() {
+    this.masterVideo = document.createElement('video')
+    this.masterVideo.src = 'https://pub-bc00aeb1aeab4b7480c2d94365bb62a9.r2.dev/blank.mp4'
+    this.masterVideo.loop = true
+    this.masterVideo.muted = true // Must be muted for autoplay
+    this.masterVideo.playsInline = true
+    this.masterVideo.style.display = 'none'
+    this.masterVideo.style.position = 'absolute'
+    this.masterVideo.style.width = '1px'
+    this.masterVideo.style.height = '1px'
+    this.masterVideo.style.opacity = '0'
+    this.masterVideo.style.pointerEvents = 'none'
+    document.body.appendChild(this.masterVideo)
     
-    this.blankVideo.addEventListener('loadeddata', () => {
-      console.log('Blank video loaded for Safari autoplay context')
-      // Start blank video immediately to establish autoplay context
-      this.startBlankVideoAggressively()
-    })
-    
-    this.blankVideo.addEventListener('error', (e) => {
-      console.warn('Blank video failed to load:', e)
-    })
-    
-    // Multiple strategies to keep blank video alive
-    this.blankVideo.addEventListener('pause', () => {
-      console.log('Blank video paused - restarting immediately to maintain autoplay context')
-      this.startBlankVideoAggressively()
-    })
-    
-    this.blankVideo.addEventListener('ended', () => {
-      console.log('Blank video ended - restarting immediately')
-      this.startBlankVideoAggressively()
-    })
-    
-    // Periodic check to ensure blank video stays alive
-    setInterval(() => {
-      if (this.blankVideo && this.blankVideo.paused) {
-        console.log('Periodic check: restarting paused blank video')
-        this.startBlankVideoAggressively()
-      }
-    }, 1000) // Check every second
+    console.log('🎬 Master video created - will start on first user interaction')
   }
 
-  private startBlankVideoAggressively() {
-    if (!this.blankVideo) return
+  private async startMasterVideo() {
+    if (!this.masterVideo || this.hasUserInteracted) return
     
-    // Multiple restart attempts with different delays
-    const attemptPlay = (delay: number = 0) => {
-      setTimeout(() => {
-        if (this.blankVideo && this.blankVideo.paused) {
-          console.log(`Attempting blank video restart (delay: ${delay}ms)`)
-          this.blankVideo.play().catch(e => 
-            console.warn(`Blank video restart failed (delay: ${delay}ms):`, e)
-          )
-        }
-      }, delay)
+    try {
+      console.log('🎬 Starting master video for Safari autoplay context')
+      await this.masterVideo.play()
+      this.hasUserInteracted = true
+      console.log('✅ Master video started successfully - autoplay context established')
+    } catch (error) {
+      console.warn('❌ Master video failed to start:', error)
     }
-    
-    // Try immediately and with various delays
-    attemptPlay(0)
-    attemptPlay(10)
-    attemptPlay(50)
-    attemptPlay(100)
   }
+
+  private syncMasterVideo() {
+    if (!this.masterVideo || !this.hasUserInteracted) return
+    
+    if (this.isPlaying) {
+      if (this.masterVideo.paused) {
+        this.masterVideo.play().catch(e => 
+          console.warn('Master video sync play failed:', e)
+        )
+      }
+    } else {
+      if (!this.masterVideo.paused) {
+        this.masterVideo.pause()
+      }
+    }
+  }
+
+
 
   private adjustMusicVolume(mediaType: 'video' | 'image') {
     if (!this.backgroundMusic) return
@@ -813,6 +737,9 @@ class MediabunnyPlayer {
     } else {
       this.backgroundMusic.pause()
     }
+
+    // Also sync master video
+    this.syncMasterVideo()
   }
 }
 
