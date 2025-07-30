@@ -215,10 +215,7 @@ class MediabunnyPlayer {
       // (videos that autoplay will sync music after successful play)
       const willAutoPlay = autoPlay && mediaItem.type === 'video' && this.hasUserInteracted
       if (!willAutoPlay) {
-        console.log('Syncing music for non-autoplay scenario')
         this.syncMusicPlayback()
-      } else {
-        console.log('Skipping music sync - will sync after video autoplay succeeds')
       }
       
       this.updatePlaylist()
@@ -257,31 +254,26 @@ class MediabunnyPlayer {
       video.addEventListener('loadedmetadata', loadedHandler)
       
       // Set new source - this will trigger loading
-      console.log(`🎬 Switching persistent video to: ${mediaItem.url}`)
       video.src = mediaItem.url
       
       // Auto-play if requested and user has interacted
       if (autoPlay && this.hasUserInteracted) {
         setTimeout(async () => {
           try {
-            console.log('Attempting video autoplay with persistent element + master video context')
             await video.play()
             this.isPlaying = true
             this.updatePlayButton()
             this.updateStatus('Auto-playing video...')
             this.syncMasterVideo() // Sync master video
             // Sync music AFTER successful autoplay
-            console.log('Syncing music after successful autoplay')
             this.syncMusicPlayback()
           } catch (error) {
             console.warn('Auto-play blocked by browser:', error)
             this.updateStatus('Click play to continue - auto-play blocked by browser')
             // Sync music even when autoplay fails to keep state consistent
-            console.log('Syncing music after autoplay failed')
             this.syncMusicPlayback()
           } finally {
             // Re-enable event handling after autoplay attempt completes
-            console.log('Re-enabling event handling after autoplay attempt')
             this.isSwitchingMedia = false
           }
         }, 100) // Short delay to ensure video is ready
@@ -327,7 +319,6 @@ class MediabunnyPlayer {
     this.startImageTimer()
     
     // Ensure background music plays for images
-    console.log('Starting image display - syncing music playback')
     this.syncMusicPlayback()
   }
 
@@ -562,7 +553,7 @@ class MediabunnyPlayer {
     // For persistent video, add a play event listener to sync with master video
     if (this.currentMedia instanceof HTMLVideoElement) {
       const playHandler = () => {
-        console.log('Persistent video started playing')
+        // Video started playing
       }
       this.currentMedia.addEventListener('play', playHandler, { once: true })
     }
@@ -578,30 +569,23 @@ class MediabunnyPlayer {
 
     const endedListener = () => {
       if (this.currentMedia) { // Only trigger if this is still the current media
-        console.log('Media ended - going to next media')
         this.goToNextMedia(true)
       }
     }
 
     const playListener = () => {
       if (this.currentMedia && !this.isSwitchingMedia) {
-        console.log('Media play event triggered')
         this.isPlaying = true
         this.updatePlayButton()
         this.syncMusicPlayback()
-      } else if (this.isSwitchingMedia) {
-        console.log('Media play event during switch - ignoring to prevent interference')
       }
     }
 
     const pauseListener = () => {
       if (this.currentMedia && !this.isSwitchingMedia) {
-        console.log('Media pause event triggered')
         this.isPlaying = false
         this.updatePlayButton()
         this.syncMusicPlayback()
-      } else if (this.isSwitchingMedia) {
-        console.log('Media pause event during switch - ignoring to prevent interference')
       }
     }
 
@@ -730,7 +714,6 @@ class MediabunnyPlayer {
     if (!this.masterVideo || this.hasUserInteracted) return
     
     try {
-      console.log('🎬 Starting master video for Safari autoplay context')
       await this.masterVideo.play()
       this.hasUserInteracted = true
       
@@ -802,12 +785,9 @@ class MediabunnyPlayer {
     
     if (this.isPlaying) {
       if (!isPlaying) {
-        console.log('🎵 Starting background music')
-        
         // Check if Howler.js audio context is suspended (common on mobile)
         const ctx = (this.backgroundMusic as any)._audioNode?.context
         if (ctx && ctx.state === 'suspended') {
-          console.log('🎵 Resuming suspended audio context')
           await ctx.resume()
         }
         
@@ -815,7 +795,6 @@ class MediabunnyPlayer {
       }
     } else {
       if (isPlaying) {
-        console.log('🎵 Pausing background music')
         this.backgroundMusic.pause()
       }
     }
